@@ -2,16 +2,16 @@
 
 - **Stopped at:** P0.0 audit now includes an exact sanitized evidence request, read-only query set, client/owner decision register, and exit checklist. No actual DB/Hostinger evidence or new decisions were received; P0.0 remains blocked. No P0.1 work has started.
 - **Readiness:** **NOT READY FOR IMPLEMENTATION**
-- **Snapshot at handover:** `Keroles12345/ReefOS`, branch `main`, commit `02aeefa67340af267eb5f3eb434a150f7febf600`
-- **Latest verified worktree:** no tracked changes; untracked `docs/extra-fun/` and `docs/implementation/`
-- **Last updated:** 2026-11-27 22:17 +02:00
+- **Snapshot at handover:** `Keroles12345/ReefOS`, branch `main`, HEAD / `origin/main` commit `efeb4e65447b1441daae10d5f665aa90e1f3be1b`, parent `02aeefa67340af267eb5f3eb434a150f7febf600`
+- **Latest verified worktree:** clean before this reconciliation; this update leaves only the three handover records modified and uncommitted.
+- **Last updated:** 2026-11-27 22:25 +02:00
 
 ## Before doing anything
 
 1. Read [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md), the latest entry in [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md), and this file.
 2. Verify Git remote, branch, commit and `git status --short --branch`; preserve all untracked files.
 3. Read [P0-0-pre-implementation-audit.md](./P0-0-pre-implementation-audit.md) and the existing [Extra Fun blueprint](../implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md).
-4. The blueprint is an existing untracked file and was intentionally not edited. Its repository label says `Keroles12345/systemMarinaX`; current Git remote is `Keroles12345/ReefOS`.
+4. HEAD newly adds `docs/implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md` to Git tracking; the parent has no such path. The current file matched the HEAD blob when checked. The earlier untracked copy has no stored Git hash, so whether its bytes changed before the commit is unknown. Do not edit the blueprint during P0.0. Its repository label says `Keroles12345/systemMarinaX`; the configured remote is `Keroles12345/ReefOS`.
 
 ## Exact next task
 
@@ -40,6 +40,7 @@ Continue **P0.0 only**: receive and assess the evidence and decisions listed bel
 ### Commands/checks for the next task
 
 - First: `git status --short --branch`, `git rev-parse HEAD`, and verify the remote without printing embedded credentials.
+- The latest verified commit is `efeb4e65447b1441daae10d5f665aa90e1f3be1b` (parent `02aeefa67340af267eb5f3eb434a150f7febf600`). Do not assume the earlier untracked-file state is still current; the blueprint and handover records are now tracked.
 - Use audit section K for the DBA's read-only SQL and exact requested outputs. The assistant must not connect to a production database or run these queries itself.
 - Do not run `php artisan migrate`, seeders, write queries, or any production DB command.
 - Do not inspect `.env` or request credentials in chat. If safe DB evidence is unavailable, mark it **UNVERIFIED — REQUIRES CONFIRMATION** and remain blocked.
