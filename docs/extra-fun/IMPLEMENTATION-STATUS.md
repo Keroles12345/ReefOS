@@ -1,20 +1,20 @@
 # Extra Fun Integration — Implementation Status
 
-- **Overall status:** P0.1 implementation in progress; legacy company containment is committed, and the booking-limiter/auth regression increment is tested and independently reviewed on the feature branch.
+- **Overall status:** P0.1 implementation in progress; legacy company containment and the booking-limiter/auth regression increment are committed locally. Push is blocked by unavailable GitHub HTTPS authentication.
 - **Current phase:** P0.1 — legacy API company-scoped authorization and regression hardening.
 - **P0.0 audit status:** **BLOCKED**; live database/Hostinger evidence and owner/client approvals remain outstanding.
 - **P0.1 API-client/channel schema:** Not started; active database identity and schema evidence remain unverified.
 - **Authorization semantics:** Checks are made at request start. Revocation/company changes committed before a later request's check deny that request; an already-authorized in-flight request may complete. Strict mid-request cancellation or target-engine locking has not been implemented or verified.
 - **Security review:** No confirmed company-boundary bypass found. The prior in-flight concern is documented as request-start semantics; concurrency behavior on the target engine remains unverified.
-- **Last updated:** 2026-11-27 23:30 +02:00
+- **Last updated:** 2026-11-27 23:31 +02:00
 
 ## Verified repository snapshot
 
 - Remote: `https://github.com/Keroles12345/ReefOS.git`
 - Branch: `feature/extra-fun-platform`
-- `HEAD`: `574e19f57b7dc8e49ca1ef33d317ac46942eb878` (`ar p1 v5`); `origin/main` is the same commit.
-- The worktree was clean when this branch was created from current `main`. Increment 1 was already committed and present on `origin/main`; it was preserved, not recreated. Current feature-branch changes are uncommitted regression tests and handover updates.
-- The feature branch has not yet been pushed. Historical repository snapshots remain in [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md).
+- `HEAD`: `4e8a3d0d8151d8ba6f1d06e2feddee3db8a88cbe` (`Fix legacy booking API rate limit`); `origin/main` remains at `574e19f57b7dc8e49ca1ef33d317ac46942eb878`.
+- The worktree was clean when this branch was created from current `main`. Increment 1 was already committed and present on `origin/main`; it was preserved, not recreated.
+- The new increment is committed locally. Its push attempt failed with `Invalid username or token. Password authentication is not supported for Git operations.` Remote feature-branch state is not verified. Current handover corrections are uncommitted.
 - Historical commit and blueprint-tracking facts remain preserved in earlier entries of [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md).
 
 ## Verified baseline
@@ -35,7 +35,7 @@
 - **Tested:** `php artisan test tests/Feature/WebsiteApiTest.php` — **22 tests / 258 assertions passed** using the test suite's in-memory SQLite. Coverage includes 10 allowed booking attempts from one IP, a separate IP bucket, a `429` on the 11th from the first IP, missing-context logging, request-start company binding/subsequent denial, cross-tenant company input rejection without writes, and trip-list pricing after company rebinding.
 - **Checked:** `vendor/bin/pint --test app/Providers/AppServiceProvider.php routes/api.php tests/Feature/WebsiteApiTest.php`, `php -l` on all three changed PHP files, and `git diff --check` passed.
 - **No database changes:** no migrations were created or run; no configured local or production DB was accessed.
-- **Review:** Security Engineer found no vulnerability; Reviewer approved after closing the low-priority independent-IP coverage finding; QA passed. Commit/push and remote SHA verification are pending.
+- **Review:** Security Engineer found no vulnerability; Reviewer approved after closing the low-priority independent-IP coverage finding; QA passed. Local commit is complete; push/remote SHA verification is blocked by GitHub authentication.
 
 ## Blocked / requires decisions
 
@@ -63,4 +63,4 @@
 
 ## Exact next action
 
-Commit the independently reviewed and validated 9-file increment to `feature/extra-fun-platform`, push that branch, and verify its remote SHA. Then continue any engine-independent work. In parallel, obtain authorized sanitized evidence of the active non-production DB engine/version and relevant schema plus matching target/staging metadata. Keep schema-dependent work blocked until those facts are verified; production remains read-only.
+Reconcile and commit this handover update, then retry pushing `feature/extra-fun-platform` only when authorized GitHub authentication is available; verify the remote SHA. Continue engine-independent work where possible. In parallel, obtain authorized sanitized evidence of the active non-production DB engine/version and relevant schema plus matching target/staging metadata. Keep schema-dependent work blocked until those facts are verified; production remains read-only.

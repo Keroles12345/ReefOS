@@ -390,3 +390,11 @@ These are architectural/documentation risks, not demonstrated vulnerabilities in
 - **QA:** **PASS**; independently reran the focused suite and checks: 22 tests / 258 assertions; Pint, syntax checks, and `git diff --check` passed.
 - No reviewer or QA agent modified files. No schema/DB, migration, production, or deployment activity occurred.
 - This 9-file increment is ready for feature-branch commit/push. It remains uncommitted; `origin/main` is unchanged at `574e19f57b7dc8e49ca1ef33d317ac46942eb878`.
+
+## 2026-11-27 23:31 +02:00 — Local commit preserved; push blocked
+
+- Committed the reviewed increment on `feature/extra-fun-platform`: `4e8a3d0d8151d8ba6f1d06e2feddee3db8a88cbe` (`Fix legacy booking API rate limit`), with the required co-author trailer.
+- Attempted `git push -u origin feature/extra-fun-platform`. Push failed because HTTPS credentials were unavailable: `Cannot prompt because user interactivity has been disabled` / `Invalid username or token. Password authentication is not supported for Git operations.`
+- No force-push or alternate credential retrieval was attempted. The local commit is preserved. Remote feature-branch SHA is unverified; `origin/main` remains at the parent commit as last verified.
+- Updated status, next-session, and Blueprint Section 26 to reflect the local commit and authentication blocker. These handover edits are currently uncommitted and must be committed separately after review.
+- No migration, database access, production operation, or deployment occurred.

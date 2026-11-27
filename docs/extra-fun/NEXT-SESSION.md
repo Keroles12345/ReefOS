@@ -1,13 +1,13 @@
 # Extra Fun Integration — Next Session Handover
 
-- **Stopped at:** The security/rate-limit increment is implemented, tested, and independently reviewed on `feature/extra-fun-platform`; commit/push and remote SHA verification remain pending. P0.0 evidence remains **BLOCKED**; no schema-dependent work, migration, production access, or deployment occurred.
-- **Last completed task:** Verified that Increment 1 was already committed and present in `origin/main` as `574e19f57b7dc8e49ca1ef33d317ac46942eb878`; created the feature branch from that commit; fixed the booking throttle's nested-key collision and added company-binding and limiter regressions. Reviewer closed its low-priority separate-IP test finding.
-- **Exact next task:** Commit the reviewed 9-file increment, push to `origin/feature/extra-fun-platform`, and verify remote SHA. Then continue engine-independent work where safe; do not start schema-dependent phases before sanitized matching DB evidence is available.
+- **Stopped at:** The security/rate-limit increment is implemented, tested, independently reviewed, and committed locally on `feature/extra-fun-platform` as `4e8a3d0d8151d8ba6f1d06e2feddee3db8a88cbe`. Push failed because GitHub HTTPS authentication was unavailable; remote feature-branch SHA is unverified. P0.0 evidence remains **BLOCKED**; no schema-dependent work, migration, production access, or deployment occurred.
+- **Last completed task:** Verified that Increment 1 was already committed and present in `origin/main` as `574e19f57b7dc8e49ca1ef33d317ac46942eb878`; created the feature branch from that commit; fixed the booking throttle's nested-key collision and added company-binding and limiter regressions. Reviewer closed its low-priority separate-IP test finding; QA passed 22 tests / 258 assertions.
+- **Exact next task:** Commit the handover correction, then retry `git push -u origin feature/extra-fun-platform` when GitHub authentication is available and verify remote SHA. Continue engine-independent work where safe; do not start schema-dependent phases before sanitized matching DB evidence is available.
 - **Readiness:** Legacy company containment remains implemented in the parent commit. The focused tests passed 22 tests / 258 assertions using in-memory SQLite, including 10 allowed booking attempts, an independent second-IP bucket, and a rate-limited 11th request. API clients/channels, product catalog extensions, pricing rules, availability, quotes, and reservations are **NOT READY** pending schema evidence and relevant decisions.
 - **Authorization semantics:** Checks are made at request start. A request already authorized may complete after a company/key change; a later request is denied after the change commits. No target-engine concurrency guarantee is claimed.
 - **Snapshot:** `Keroles12345/ReefOS`, branch `feature/extra-fun-platform`, `HEAD` `574e19f57b7dc8e49ca1ef33d317ac46942eb878`; `origin/main` is the same commit.
-- **Worktree:** The branch was created from a clean, synchronized main. Current uncommitted changes are the test increment and handover/contract corrections. The feature branch has not yet been pushed.
-- **Last updated:** 2026-11-27 23:30 +02:00
+- **Worktree:** The increment is committed locally. Current uncommitted changes are handover corrections recording the failed push. Push attempt failed with `Invalid username or token. Password authentication is not supported for Git operations.` Do not request or paste secrets; restore approved GitHub authentication through the normal environment.
+- **Last updated:** 2026-11-27 23:31 +02:00
 
 ## Before doing anything
 
@@ -26,7 +26,7 @@
 - A follow-up Security Engineer review recommends request-start authorization semantics: revocation/company changes deny requests checked afterward; already-authorized in-flight requests may complete. This is not a target-engine concurrency guarantee.
 - Added tests now cover missing-context reason logging, trip-list pricing after rebinding, and rejection of a company ID belonging to another tenant without creating records.
 - The previous `throttle:10,1` shared its framework route/IP counter with the 60/minute group throttle; the new named limiter has an independent counter and focused regression coverage. This is not API-client-scoped rate limiting.
-- Security Engineer found no vulnerability; Reviewer approved after the separate-IP bucket test was added; QA passed 22 tests / 258 assertions. IPv6/proxy trust and distributed-cache behavior remain unverified. Commit and feature-branch push are pending.
+- Security Engineer found no vulnerability; Reviewer approved after the separate-IP bucket test was added; QA passed 22 tests / 258 assertions. IPv6/proxy trust and distributed-cache behavior remain unverified. Commit succeeded locally; push is blocked by missing authentication.
 
 ### 1. Obtain database evidence safely
 
