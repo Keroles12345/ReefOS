@@ -4,18 +4,18 @@
 - **Current phase:** P0.0 — Pre-implementation audit
 - **P0.0 activity:** Audit report created and reviewed; exit criteria are **not met**
 - **Implementation:** Not started; do not start P0.1 without owner approval and blocker resolution
-- **Last updated:** 2026-11-27 22:25 +02:00
+- **Last updated:** 2026-11-27 22:34 +02:00
 
 ## Verified repository snapshot
 
 - Remote: `https://github.com/Keroles12345/ReefOS.git`
 - Branch: `main`
-- HEAD and `origin/main`: `efeb4e65447b1441daae10d5f665aa90e1f3be1b`
-- Parent of HEAD: `02aeefa67340af267eb5f3eb434a150f7febf600`
-- Latest commit adds five documentation files: the three handover records, the P0.0 audit, and `docs/implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md`.
-- The blueprint did not exist in the parent tree and is marked added (`A`) in HEAD. Its working-tree blob matched the HEAD blob at inspection; there was no post-commit blueprint diff.
-- The worktree was clean before this correction. This reconciliation changes only this status file, the implementation log, and next-session handover; those documentation edits are uncommitted.
-- The prior 22:17 record that the blueprint was untracked describes the state observed then. Git has no stored copy/hash of that untracked pre-commit file, so whether its contents changed before being added cannot be established from Git history.
+- HEAD, `origin/main`, and remote `main`: `c6a581886e58a13294fc645c7671cb20f9073e60`
+- Parent of HEAD: `efeb4e65447b1441daae10d5f665aa90e1f3be1b`
+- Latest commit: `ar p0.0 v2`; it modifies the three handover documents and does not modify the blueprint.
+- The worktree was clean and local `main` was synchronized with `origin/main` when this reconciliation began. This update changes the three handover documents and the blueprint header; those four documentation edits are uncommitted.
+- Historical Git fact: commit `efeb4e65447b1441daae10d5f665aa90e1f3be1b` first added the blueprint to tracking. Its prior untracked contents were not recorded in Git, so byte-for-byte comparison with that earlier file remains unverifiable.
+- The blueprint's repository header has now been corrected to `Keroles12345/ReefOS`; the prior mismatched value is preserved as a historical finding in the log.
 - PHP CLI: `8.5.10`; `composer.json` requires `^8.3`.
 - Laravel CLI: `13.43.0`; `composer.json` requires `^13.0`.
 - Local PDO drivers: `mysql`, `sqlite`. This does not identify the active or production database.
@@ -23,14 +23,14 @@
 
 ## Completed
 
-- **Verified:** current Git remote is ReefOS; local folder name and the blueprint's `systemMarinaX` repository label differ from the remote.
+- **Verified:** configured remote and current repository are ReefOS; the blueprint's prior `systemMarinaX` header has been corrected to ReefOS in this reconciliation.
 - **Verified:** PHP/Laravel runtime, Composer requirements, local PDO drivers, database configuration defaults, and SQLite in-memory PHPUnit configuration.
 - **Reviewed:** API routes/authentication, tenant/company boundaries, booking/lifecycle and staff creation flows, migrations/models/tests, pricing read/write path, timezone fields, payment/WhatsApp bindings, and the proposed schema.
 - **Created:** [P0.0 pre-implementation audit](./P0-0-pre-implementation-audit.md), an audit-only report with six-point review, table assessment, migration plan, capacity flow, risks, client decisions, and P0 acceptance tests.
 - **Checked:** audit report local Markdown links resolve and it has no trailing whitespace.
 - **Continued P0.0:** added exact read-only Hostinger/database evidence requests, engine-specific metadata query starters, sanitized pricing/tenant-integrity and legacy-capacity checks, decision owners/rationales, and a P0.0 exit checklist to the audit report.
-- **Reverified:** Git remote, branch, commit and current worktree state on 2026-11-27; they match the snapshot above.
-- **Corrected Git handover:** verified the current main commit and parent, confirmed the blueprint was newly added to Git tracking, and distinguished that fact from the unprovable comparison with its earlier untracked contents.
+- **Reverified:** Git remote, branch, commit, log, local tracking ref, remote `main`, and worktree state on 2026-11-27; local and remote were synchronized and clean before edits.
+- **Corrected Git handover:** updated the snapshot to commit `c6a581886e58a13294fc645c7671cb20f9073e60`; corrected the blueprint repository header and retained the earlier tracking history without treating it as current state.
 
 ## Blocked / pending
 
@@ -44,13 +44,13 @@
 
 ## Changes and checks
 
-- No application source, migrations, database records/schema, `.env`, configuration, routes, models, middleware, or OpenAPI changes were made. This reconciliation changes only the three handover records; the audit and blueprint were not edited.
-- No database query, migration, or test suite was run. Existing test files were reviewed only. The SQL in the audit is a request for the authorized DBA; it has not been executed.
-- This continuation ran read-only `git status --short --branch`, `git rev-parse HEAD`, and `git remote get-url origin`; outputs match the verified snapshot above.
-- Git history checks ran for `HEAD`, its parent, the remote `main` ref, the commit path/status list, and blueprint blob equality. The remote branch and local `origin/main` both resolve to the recorded HEAD.
-- Final `git status` shows only the three handover records modified; `git diff --check`, the trailing-whitespace check, and relative Markdown-link check passed.
-- Earlier audit checks included `php -v`, `php artisan --version`, read-only `PDO::getAvailableDrivers()`, and audit-report link/whitespace checks. No application tests were executed.
-- **Documentation check:** PowerShell checked trailing whitespace and relative Markdown links in `docs/extra-fun/*.md`; both checks passed after this update.
+- No application source, migrations, database records/schema, `.env`, configuration, routes, models, middleware, or OpenAPI changes were made. This reconciliation changes only the three handover records and the blueprint repository header; the P0.0 audit was not edited.
+- No database query, migration, or test suite was run in this reconciliation. The SQL in the audit remains an unexecuted request for the authorized DBA.
+- This continuation ran `git status`, `git branch --show-current`, `git rev-parse HEAD`, `git rev-parse origin/main`, `git log -5 --oneline`, and a read-only `git ls-remote` check. At task start, status was clean and all remote/local revision checks agreed.
+- The latest commit parent and changed paths were inspected; its three modified paths were the handover documents. The subsequent uncommitted changes in this task are four documentation files.
+- `git diff --check` initially flagged trailing whitespace on the changed blueprint header; the line was changed to an explicit `<br>`, and the final check passed.
+- Relative Markdown-link checks for the audit, handover, and blueprint documents passed. Application tests and migrations were not run.
+- Earlier audit runtime checks (`php -v`, `php artisan --version`, and read-only `PDO::getAvailableDrivers()`) are recorded in the historical log entries; they were not rerun here.
 - Do not treat the repository's SQLite defaults or PHPUnit SQLite configuration as proof of the production database engine.
 
 ## Next action

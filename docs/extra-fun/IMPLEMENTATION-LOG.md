@@ -116,3 +116,35 @@ No prior `IMPLEMENTATION-LOG.md` was present, so this is the initial entry; no h
 - Final state: `HEAD`, `origin/main`, and `git ls-remote` for `main` all agree; only the three handover records are modified.
 - `git diff --check` — passed; PowerShell trailing-whitespace and relative Markdown-link checks for `docs/extra-fun/*.md` — passed.
 - P0.0 evidence and approval blockers remain unresolved; P0.1 remains unauthorized.
+
+## 2026-11-27 22:33 +02:00 — P0.0 Git snapshot and repository-label reconciliation
+
+**Status:** P0.0 remains **BLOCKED**. Documentation-only correction; no P0.1 work started.
+
+### Git verification
+
+- `git status` reported a clean worktree and branch up to date with `origin/main`.
+- `git branch --show-current` reported `main`.
+- `git rev-parse HEAD` and `git rev-parse origin/main` both reported `c6a581886e58a13294fc645c7671cb20f9073e60`.
+- `git log -5 --oneline` showed:
+  - `c6a5818 ar p0.0 v2`
+  - `efeb4e6 adding the artchetture`
+  - `02aeefa the project`
+- `git ls-remote origin refs/heads/main` confirmed remote `main` at `c6a581886e58a13294fc645c7671cb20f9073e60`.
+- HEAD's parent is `efeb4e65447b1441daae10d5f665aa90e1f3be1b`. The latest commit modifies only `IMPLEMENTATION-STATUS.md`, `IMPLEMENTATION-LOG.md`, and `NEXT-SESSION.md`; it does not modify the blueprint.
+- The synchronization/clean-worktree condition was satisfied at task start, so the requested documentation reconciliation proceeded. The changes below are uncommitted; no pull, reset, checkout, rebase, stash, or overwrite was performed.
+
+### Reconciliation
+
+- Updated the current repository snapshot in the status and next-session records to the verified `c6a5818` commit, including parent and clean-at-start state.
+- Changed the blueprint's repository header from `Keroles12345/systemMarinaX` to `Keroles12345/ReefOS`.
+- Preserved the 22:07, 22:17, and 22:25 entries and the P0.0 audit's historical commit/evidence timestamps. The earlier untracked blueprint had no recorded Git blob, so whether its contents changed before the `efeb4e6` add cannot be determined.
+- Files changed in this reconciliation: the three handover records and the blueprint. The P0.0 audit report and all application/runtime files remain untouched.
+- P0.0 remains blocked by the database/Hostinger evidence and owner/client decisions documented in the audit; P0.1 remains unauthorized.
+
+### Validation
+
+- Git status/revision/log/remote checks — passed; local `main`, `origin/main`, and remote `main` were synchronized at task start.
+- Tests and migrations — not run, as instructed.
+- `git diff --check` initially found trailing whitespace on the changed blueprint metadata line. Replaced that trailing-whitespace line break with `<br>`; the final `git diff --check` passed.
+- Relative Markdown-link check across the audit, handover, and blueprint documents — passed.

@@ -2,7 +2,7 @@
 
 **Status:** Implementation plan only  
 **Scope:** ReefOS reusable SaaS transformation for Extra Fun Diving Club  
-**Repository:** `Keroles12345/systemMarinaX`  
+**Repository:** `Keroles12345/ReefOS`<br>
 **Evidence date:** 2026-11-27
 
 ## Evidence Legend
