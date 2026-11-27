@@ -148,3 +148,63 @@ No prior `IMPLEMENTATION-LOG.md` was present, so this is the initial entry; no h
 - Tests and migrations — not run, as instructed.
 - `git diff --check` initially found trailing whitespace on the changed blueprint metadata line. Replaced that trailing-whitespace line break with `<br>`; the final `git diff --check` passed.
 - Relative Markdown-link check across the audit, handover, and blueprint documents — passed.
+
+## 2026-11-27 22:52 +02:00 — Implementation foundation preparation
+
+**Status:** Architecture and coordination documentation updated. Application implementation remains **NOT STARTED**. P0.0 evidence/approval gate remains **BLOCKED**.
+
+### Verified repository and runtime facts
+
+- `git remote -v` identifies `origin` as `https://github.com/Keroles12345/ReefOS.git`.
+- `git status --short --branch` reported `main...origin/main` and a clean worktree before edits. `git branch --show-current` reported `main`; `git rev-parse HEAD` and `git rev-parse origin/main` both reported `d8ab9ba4b1a46818d21e88e8c5cd9273f497bc8b`.
+- `git log -5 --oneline` shows `d8ab9ba ar p0.0 v3` followed by `c6a5818 ar p0.0 v2`, `efeb4e6 adding the artchetture`, and `02aeefa the project`.
+- `php -v` reported PHP `8.5.10`; `php artisan --version` reported Laravel `13.43.0`.
+- A first inline PDO probe failed with a PHP parse error caused by command quoting/PowerShell interpolation. A corrected safe command succeeded: PDO drivers are `mysql, sqlite`; a temporary `sqlite::memory:` connection reports SQLite `3.53.4`. No configured local or production DB was connected.
+- Reviewed the required handover, audit, full blueprint, API/database coordination docs, repository instructions, routes, API controller/middleware, booking lifecycle, pricing model/migration/callers, tenant helper, core schema migrations, and focused feature test.
+
+### Architecture and schema findings recorded
+
+- `trips` remains the single canonical product. Categories and variants are additive metadata, not a second catalog.
+- API clients are proposed as one tenant + one company each; they may access multiple channels only for that same tenant/company. Each channel binds one shared/global currency.
+- Participant attributes are independent dimensions; one participant can be adult and diver. No unapproved age, qualification, medical, or pricing rule was activated.
+- Quotes are non-blocking immutable price snapshots. Reservations are separate expiring holds. Booking conversion uses the existing `operations` record and is atomic/one-time.
+- The shared reservation/allocation ledger is authoritative for consumed capacity; `remaining_capacity` is calculated. Boats, staff, and equipment need typed resource references and interval/quantity conflict checks. No capacity booking writes were implemented.
+- Repository-level `prices_company` mismatch was verified: migration, direct query callers, and tests use `id_company/id_trip/id_currency/price_adult/price_child/price_infant`; the model fillable/default relationship names differ. The live schema, tenant consistency, nulls, and duplicate rows remain **UNVERIFIED**.
+- The existing API uses tenant-wide API keys; current website booking writes create operations without a capacity reservation. Existing tests do not cover quotes, reservations, availability, or concurrent capacity.
+
+### Files changed
+
+- **Updated:** `docs/implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md` — repository-verified foundation, ERD, proposed migration order, bounded P0 breakdown, expiration/idempotency/capacity decisions, compatibility/rollback and test plan.
+- **Updated:** `docs/API_CONTRACTS.md` — verified existing route inventory and clearly marked proposed client-bound endpoints/authorization.
+- **Updated:** `docs/DATABASE.md` — checked-in schema inventory, exact `prices_company` drift, target-engine evidence limitations, and proposed migration dependencies.
+- **Updated:** `docs/extra-fun/IMPLEMENTATION-STATUS.md` and `docs/extra-fun/NEXT-SESSION.md` — current state, blockers, Git snapshot, and exact next task.
+- **Updated:** this log by appending this entry; previous entries were preserved.
+- **Application source/config/routes/OpenAPI/database/deployment changes:** none.
+- **Migrations added or run:** none.
+
+### Validation and remaining work
+
+- `git diff --check` — passed.
+- `php -v` and `php artisan --version` — ran successfully with the versions above.
+- Temporary in-memory SQLite version query — ran successfully; this is not active-local or production DB evidence.
+- Application tests — not run; documentation-only changes. No tests are claimed as passed.
+- No migration, active local database query, production connection, or deployment action was performed.
+- At task start, local `main` and `origin/main` were synchronized and clean. Documentation edits are now uncommitted; no commit was created.
+- Outstanding: sanitized active-local and target/staging DB engine/schema evidence; `prices_company` duplicate and tenant-integrity counts; matching staging confirmation; written client/owner decisions in audit Section K.5 / blueprint Section 24. P0.0 remains blocked; P0.1 implementation has not started.
+
+## 2026-11-27 22:57 +02:00 — Security review findings
+
+**Status:** Read-only security review completed. Findings remain open pending user direction; no remediation was applied.
+
+### Findings recorded
+
+- **1 HIGH:** legacy tenant-key access remains tenant-wide through existing routes during a migration period without a persisted cutoff or binding enforcement.
+- **4 MEDIUM:** idempotency scope does not explicitly bind company/channel; tenant/company cardinality constraints are not required at the database layer for every relationship; conversion authorization/ownership rechecks are not fully specified; P0 participant input lacks an exact allowlist/rejection rule.
+- **1 LOW:** some proposed authorization statements read as verified current behavior rather than target behavior.
+
+These are architectural/documentation risks, not demonstrated vulnerabilities in new application code. No code change, database query, migration, test, or deployment was performed during the security review. The detailed findings and evidence were provided to the user; follow-up is paused until the user selects a scope.
+
+### Handover
+
+- Next action: obtain the user's choice to fix highest-severity findings, fix all findings, or record a summary. Then proceed only with the selected scope.
+- P0.0 remains blocked on sanitized DB/Hostinger evidence and owner/client decisions. P0.1 implementation has not started.

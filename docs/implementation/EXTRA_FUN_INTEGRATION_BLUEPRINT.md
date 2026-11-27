@@ -55,7 +55,7 @@ This minimizes data migration: existing trips remain canonical and existing fore
 
 Quote expiry and reservation expiry are separate. A quote may be configured to expire after a short pricing validity window. A reservation gets its own short hold window after it is created. The reservation carries the quote's immutable price snapshot, so quote expiry after reservation creation does not change that held price. If a quote expires before reservation creation, the caller must request a new quote.
 
-Recommended platform defaults are a 15-minute quote validity and a 10-minute reservation hold, configurable within platform limits. Extra Fun should confirm that these timings fit its checkout workflow. A successful idempotent reservation replay returns the same reservation and original expiry; it never extends the hold. A capacity failure rolls back without a hold or successful idempotency record, so the caller may retry after refreshing availability; successful operations are persisted and replayed.
+Quote validity and reservation-hold duration are separate tenant policies. Their numeric values, allowed ranges, and whether a hold can be extended require owner/client approval; this plan activates no default. A successful idempotent reservation replay returns the same reservation and original expiry; it never extends the hold. A capacity failure rolls back without a hold or successful idempotency record, so the caller may request a fresh quote/reservation after refreshing availability.
 
 ### Decision 3: Participant attributes are independent
 
@@ -63,13 +63,15 @@ Recommended platform defaults are a 15-minute quote validity and a 10-minute res
 
 Pricing rules match attribute predicates. A rule can be a base, override, or additive component. The engine selects at most one highest-priority applicable override for a participant and applies each matching additive component at most once. Conflicting equal-priority overrides are a configuration error, not an arbitrary tie-break.
 
-### Decision 4: Capacity is authoritative in concrete availability slots
+### Decision 4: One reservation ledger accounts for capacity use
 
-**Recommendation:** `availability_slots.capacity` is the authoritative bookable participant capacity. Do not persist `remaining_capacity`; calculate it from capacity less active held and converted reservation-item quantities. A cached figure may be introduced only as a derived optimization with reconciliation, never as the authority.
+**Recommendation:** `availability_slots.capacity` is the configured participant limit for a concrete trip instance. The reservation items are the single source of truth for consumed participant capacity: count an unexpired `held` reservation or a capacity-consuming `converted` reservation once, and do not separately count its `operations` row. Calculate remaining capacity; do not store `remaining_capacity`.
 
-All booking paths for a capacity-managed trip must use this ledger. A transaction locks all quote-selected slots in stable ascending ID order, rechecks unexpired holds and converted bookings, then writes the reservation items. This also supports multi-day/package reservations atomically.
+The effective bookable quantity is bounded by the slot limit and every required assigned resource limit. Existing `boats.capacity` remains the boat's source value; staff limits and equipment stock must be explicitly configured and approved because the current schema does not define them. These limits are constraints over the same reservation/allocation transaction, not parallel counters.
 
-Boats, instructors, and rental inventory are assigned to concrete slots through typed foreign keys, not a polymorphic `resource_type/resource_id` pair. Slot publication locks the underlying boat/staff/equipment records, rejects overlapping assignments, and records the resource allocation. Booking holds lock the slot and resource-allocation rows. Equipment quantities selected as extras are held against the slot's configured equipment allocation. Advanced dive execution remains a later module; the P0 design does not introduce `diving_sessions`.
+All booking paths for a capacity-managed trip use one transaction that locks slots and required resources in stable ID order, rechecks active allocations, then writes reservation items. Typed resource foreign keys are used; no polymorphic `resource_type/resource_id` pair. Boat and staff assignments to overlapping time intervals are rejected at slot publication unless an explicitly approved sharing model is implemented. Multiple parties may share one slot only in its approved shared mode; an exclusive-boat slot permits one active reservation regardless of party size. Equipment quantities are allocated from configured inventory under the same lock protocol.
+
+Advanced dive execution remains later work; the P0 design uses availability slots and does not introduce `diving_sessions`.
 
 ### Decision 5: API clients have one company and one or more same-company channels
 
@@ -531,7 +533,7 @@ The following is verified from the checked migration chain and models:
 
 #### `availability_slots`
 
-- **Purpose:** one concrete date/time instance of a trip/variant and the authoritative participant capacity.
+- **Purpose:** one concrete date/time instance of a trip/variant and its configured participant limit.
 - **Columns:** `id`, `tenant_id`, `trip_id`, nullable `trip_variant_id`, `public_id`, `starts_at`, `ends_at`, `capacity`, `status`, timestamps.
 - **Relationships:** trip, optional variant, slot resources, reservation items.
 - **Tenant ownership:** required.
@@ -543,12 +545,12 @@ The following is verified from the checked migration chain and models:
 #### `slot_resources`
 
 - **Purpose:** assign typed resources/inventory to a concrete slot.
-- **Columns:** `id`, `tenant_id`, `availability_slot_id`, nullable `boat_id`, nullable `staff_profile_id`, nullable `extra_id`, nullable `participant_limit`, nullable `inventory_quantity`, timestamps.
+- **Columns:** `id`, `tenant_id`, `availability_slot_id`, nullable `boat_id`, nullable `staff_profile_id`, nullable `extra_id`, nullable `allocation_mode`, nullable `participant_limit`, nullable `inventory_quantity`, timestamps.
 - **Relationships:** slot and exactly one typed resource.
 - **Tenant ownership:** required.
 - **FK/deletion:** tenant cascade; slot cascade; composite tenant/resource FKs for boat/staff/extra restrict.
 - **Indexes/unique:** unique slot+boat, slot+staff, slot+extra (separate filtered constraints or equivalent); `(tenant_id, boat_id)`, `(tenant_id, staff_profile_id)`, `(tenant_id, extra_id)`.
-- **Constraint:** exactly one resource FK is non-null. Boat capacity is read from existing `boats.capacity`; each staff row has an Extra Fun-approved `participant_limit`; an extra/equipment row has `inventory_quantity`. Fields not applicable to that resource type must be null.
+- **Constraint:** exactly one resource FK is non-null. Boat capacity is read from existing `boats.capacity`; each staff row has an Extra Fun-approved `participant_limit`; an inventory-backed extra has an approved `inventory_quantity`. Boat `allocation_mode` is `shared` or `exclusive`; other values and resource limits are configured only where approved. Fields not applicable to that resource type must be null.
 - **No polymorphic IDs:** ensures referential integrity.
 
 #### `booking_quotes`
@@ -587,7 +589,7 @@ The following is verified from the checked migration chain and models:
 
 #### `reservation_resource_items`
 
-- **Purpose:** hold equipment quantities selected for reservation against an assigned `slot_resources` row. Boat and staff allocations are held by the slot assignment itself; they are not duplicated per passenger.
+- **Purpose:** hold equipment quantities selected for a reservation against an assigned `slot_resources` row. Boat and staff time allocations are represented by the slot's typed assignments and checked for interval conflicts; passenger counts are not copied into a second resource counter.
 - **Columns:** `id`, `tenant_id`, `booking_reservation_item_id`, `slot_resource_id`, `quantity`, timestamps.
 - **Relationships:** reservation item and slot resource.
 - **Tenant ownership:** required.
@@ -632,32 +634,36 @@ The response includes base/participant lines, variant/package charges, selected 
 
 ## 10. Availability and Resource Management Design
 
-A published `availability_slots` row represents one concrete bookable trip/variant instance. `capacity` is the authoritative number of participants. `remaining_capacity` is calculated as `capacity` minus quantities for active unexpired holds and converted reservations whose bookings have not released inventory. It is not stored.
+A published `availability_slots` row represents one concrete bookable trip/variant instance. Its `capacity` is the configured participant limit, while reservation items are the sole ledger of consumed participant capacity. Remaining capacity is calculated from that limit and active, unexpired holds plus converted reservations whose bookings have not released inventory. It is never stored as an authoritative counter, and the linked `operations` row is not counted a second time.
 
 Slots are explicit, not inferred from a trip existing. No published eligible slot means unavailable. Recurring schedule generation and calendar rules are intentionally out of P0.
 
 ### Quote and reservation semantics
 
 - **Quote:** does not lock or reserve inventory; it may be issued even when no capacity remains, but its response must report availability as unavailable and reservation then fails. Quote validity is independent of inventory.
-- **Reservation:** requires an unexpired quote; inserts a temporary hold only after current capacity is rechecked.
-- **Reservation expiry:** configurable tenant policy; expiration is evaluated using server time. Availability queries ignore expired holds immediately, even before cleanup. A scheduled worker marks stale rows `expired`; the worker is housekeeping, not correctness.
+- **Reservation:** requires an unexpired quote; inserts a temporary hold only after current slot and resource capacity is rechecked. A quote may produce at most one successful reservation; the client requests a new quote after a failed or expired attempt.
+- **Expiration:** quote and reservation expiry are separate persisted timestamps, evaluated against one trusted UTC server clock. The hold has its own approved TTL; it is not extended by replay. A quote's price snapshot remains fixed for the lifetime of a valid reservation, even if the quote itself later expires. TTL values and any extension policy require owner/client approval and are not defaults in this plan.
+- **Expired holds:** availability ignores them immediately when `expires_at <= now`; a scheduled worker may mark them `expired`, but cleanup is not part of correctness.
 - **Conversion:** booking creation atomically locks the held reservation and converts it; expired or released reservations return `410`/`409` and cannot create bookings.
 - **Cancellation:** only an authorized lifecycle transition releases converted inventory; payment state does not silently release a confirmed booking.
 
 ### Concurrency
 
-For a reservation with one or multiple slots, begin a database transaction, lock slot rows in ascending primary-key order, expire/check holds, calculate current held+converted quantity, validate capacity and resource requirements, then persist reservation header/items. Any failure rolls back every slot hold. Booking creation locks the reservation row and uses a unique nullable `operations.booking_reservation_id` so one reservation cannot create two bookings.
+For a reservation with one or multiple slots, begin a database transaction, lock slot rows and assigned resource rows in ascending primary-key order, calculate current held+converted allocations, validate capacity and resource requirements, then persist reservation header/items. Any failure rolls back every slot hold. Booking conversion locks the reservation, verifies `held` and `expires_at > now`, creates the existing operation and converts the reservation atomically. A unique nullable `operations.booking_reservation_id` prevents converting one reservation twice.
 
 Every new and legacy booking path must use the same capacity logic for capacity-managed trips. Legacy booking payloads without a slot/reservation receive `409 availability_required` for those trips; they must not bypass the ledger.
 
-Idempotency keys are hashed and scoped by tenant, API client, endpoint, and request body. Same key/same canonical body replays the original result. Same key/different body returns `409`. Replaying an expired hold does not renew or recreate it; the client must issue a new quote/reservation key.
+Idempotency keys are hashed and scoped by tenant, API client, endpoint, and canonical request body. The existing tenant idempotency table can be reused by deriving a scoped key hash; do not create a duplicate idempotency system unless schema evidence proves reuse is unsafe. Same key/same body replays the original result and original expiry. Same key/different body returns `409`. Replaying an expired hold does not renew or recreate it; the client must issue a new quote and reservation key. Database uniqueness resolves concurrent first-use races.
 
 ### Boats, instructors, and equipment
 
-- A slot's typed `slot_resources` link assigns boats, staff profiles, and equipment (`extras`) without a polymorphic ID.
-- Publishing or changing a slot locks its resource rows and rejects time overlap for boat/staff allocations; resource assignment is unique to the actual time interval, not merely the operation date.
-- Boat capacity and approved instructor ratios bound the slot's published participant capacity; values must be confirmed by Extra Fun.
-- Equipment add-ons use selected `reservation_resource_items` quantities against the slot's configured equipment allocation; capacity is rechecked under lock.
+- A slot's typed `slot_resources` link assigns boats, staff profiles, and inventory-backed equipment (`extras`) without a polymorphic ID.
+- Publishing or changing a slot locks its resource rows and rejects overlapping boat/staff assignments by actual `[starts_at, ends_at)` interval, not merely by operation date. Any turnaround buffer is a client decision.
+- Shared-boat slots allow multiple reservation items against the same slot, bounded by `min(availability_slots.capacity, boats.capacity)` and any approved instructor limit. An exclusive-boat slot allows only one active hold/converted booking for the boat interval, regardless of party size. A boat cannot be assigned to another overlapping slot.
+- Instructor assignments are exclusive across overlapping slots until Extra Fun approves a concurrent staffing model and ratios. No instructor ratio is inferred from current schema.
+- A dive session is represented by an availability slot for P0. A separate `diving_sessions` table is deferred unless the website integration proves it is required.
+- Equipment add-ons consume quantities only when configured as inventory-backed. `extras` currently supplies catalog/price data, not verified stock counts; unavailable stock evidence blocks inventory-backed extras.
+- Each reservation item consumes participant quantity once; resource claims are checked in the same transaction. The slot's effective availability is the minimum remaining limit across the slot and its required resources.
 - Resource assignment and reservation share one transaction and tenant validation. Existing `operation_assignments` is not used as inventory because it stores day-level assignments and an untyped resource ID, not interval capacity.
 
 ## 11. Diving Operations Module Design
@@ -719,7 +725,7 @@ Credential rotation creates a new client secret, displays it once, allows a brie
 4. If a tenant has multiple companies or integrations, do not copy the same hash into several clients. Issue separate new secrets per company/client because the existing secret cannot be split into independently revocable credentials.
 5. Configure the new API client and validate catalog, quote, reservation, and booking in a test environment.
 6. Keep the legacy key path only for identified integrations during a time-bounded transition. Do not silently map a multi-company key to every company.
-7. During transition, preserve old endpoints for mapped single-company clients; restrict `/companies` to the client-bound company. For an ambiguous/unmapped legacy tenant, deny writes from the new flow and require an explicit mapping. Existing unbound behavior is a documented residual risk, not the target architecture.
+7. Preserve legacy endpoint behavior until an owner-approved client cutover; then authenticate that integration as its bound API client and limit company/currency reads to its mapping. For an ambiguous/unmapped legacy tenant, deny access to new client-bound routes and require an explicit mapping. Existing tenant-wide legacy behavior is a documented, temporary residual risk, not the target architecture.
 8. Revoke the tenant key only after the tenant confirms cutover and telemetry shows no remaining legitimate use. Delete legacy columns only in a later approved migration.
 
 The one-tenant-key-to-many-company model cannot be converted into multiple independent secrets without reissuing credentials. A single-company tenant can retain its current secret by moving the existing hash/prefix to one client after explicit mapping. A hash copied to several clients would preserve shared authority and would not provide independent revocation.
@@ -750,9 +756,10 @@ Every new route requires a valid client, scope, active tenant/company/channel, a
 #### Legacy `GET /api/v1/companies` and `GET /api/v1/currencies`
 
 - Scope: existing legacy scopes during transition.
-- Response: only the API client's bound company and its authorized channel currency.
+- For requests authenticated as an explicitly migrated API client, response is limited to its bound company and authorized channel currency.
+- Requests still authenticated by the legacy tenant key retain the existing response during the approved, time-bounded transition; do not silently change its authority. New API-client routes never use that broad legacy context.
 - Errors: `401`, `403`, `429`.
-- Restriction: never return all tenant companies or all active global currencies to a website client.
+- Restriction: never expose tenant-wide company/currency data through a new client-bound integration.
 
 #### `GET /api/v1/catalog/products`
 
@@ -832,18 +839,20 @@ Every new route requires a valid client, scope, active tenant/company/channel, a
 
 ### Existing and new booking endpoints
 
-#### `POST /api/v1/bookings`
+#### `POST /api/v1/booking-reservations/{public_id}/booking`
 
 - Scope: `bookings:create`
-- New flow requires reservation public ID and customer details; optional participant details follow the client-approved required-field contract. No company/currency price is accepted from the client.
-- Existing legacy trip/company/currency/adults/children/infants fields remain for the legacy route only.
-- On the existing route, requests with a reservation use the new flow. Requests without one are treated as legacy and are rejected for capacity-managed trips.
-- New flow requires `Idempotency-Key`; the legacy endpoint keeps its existing optional-key behavior during transition.
+- Converts a held reservation into the existing `operations` booking. Customer details and any approved participant fields are submitted here; they cannot change the quote's price, product, or capacity selection.
+- Requires `Idempotency-Key`. The existing `POST /api/v1/bookings` remains the legacy contract during migration and is not overloaded with a second request shape.
 - Response: public booking reference, status, amount, currency, immutable price breakdown.
 - Validation: reservation is held, unexpired, owned by this API client/channel/company, and unused. Participant count/classifications and extras must match the quote; participant personal details may only fill configured fields and cannot change price or capacity.
 - Errors: `422`, `409`, `410`, `401`, `403`.
 - Atomicity: lock reservation, create customer/operation/participants/operation extras, snapshot totals and convert reservation in one transaction.
 - Idempotency: same canonical body replays the original booking; changed body conflicts; unique operation reservation reference prevents a second booking.
+
+#### Legacy `POST /api/v1/bookings`
+
+Preserve the current request and response for trips not yet capacity-managed. Once a trip is enabled for slots, reject legacy requests that do not reference the reservation flow with `409 availability_required`; no staff/API path may bypass the shared ledger.
 
 #### `GET /api/v1/bookings/{public_reference}`
 
@@ -1117,11 +1126,11 @@ Tests must run against a disposable database. No test pass may be reported until
 - **Objective:** server-side prices with non-exclusive participant attributes.
 - **Affected modules:** pricing service, `prices_company`, participant intake/booking resource.
 - **Dependencies:** P0.2 and approved prices/rules.
-- **Database:** additive `prices_company` pricing fields; classification, participant, and classification pivot tables only for per-person detail required by client.
+- **Database:** additive `prices_company` pricing fields only after resolving the live schema and duplicate rows; classification, participant, and classification pivot tables only for per-person detail required by the client. Reuse `extras` and `operation_extras`; add applicability mapping only if required.
 - **Tasks:** support fixed booking/per-person/day/hour/package and extras; define override/additive precedence; use channel currency; snapshot line items.
 - **Tests:** fixed private price not multiplied; adult diver matches independent dimensions; child non-diver; conflict/priority; currency and manipulation.
 - **Acceptance:** identical inputs and price configuration reproduce identical breakdown; existing price rows keep working.
-- **Risks:** unresolved taxes, currency conversion, and price rule precedence.
+- **Risks:** the repository-level model/migration naming drift is verified, but deployed schema and duplicate-row state are not; taxes, currency conversion, and price rule precedence require decisions.
 
 ### P0.4 - Non-blocking quotes
 
@@ -1203,7 +1212,7 @@ These are business approvals, not engineering defaults. Public website values ar
 
 ### Unresolved Technical Risks
 
-- **Current `Prices_company` discrepancy:** model `$fillable` names do not match migration/controller column names. Resolve by examining the actual deployment schema and existing tests before any schema change.
+- **Current `Prices_company` discrepancy:** the checked-in migration and direct query-builder callers use `id_company`, `id_trip`, `id_currency`, and `price_adult/child/infant`; the Eloquent model fillable fields and default relation keys use different names. The checked-in test fixture also uses the migration names. The deployed schema and duplicate-row state remain unverified. Do not rename columns or add uniqueness until sanitized target-schema evidence is reviewed.
 - **Database engine and isolation:** `composer.json` does not identify the production database. `lockForUpdate()` semantics and unique-null behavior must be validated for the target engine.
 - **Legacy API clients:** the repository does not establish which external websites use the one-key tenant API, their company mappings, or permitted downtime. Telemetry and a tenant-by-tenant migration plan are required.
 - **Legacy capacity bypass:** capacity-managed trips cannot safely accept old booking requests without slot selection. Existing integrations may need a contract update or a deliberate cutover date.
@@ -1213,6 +1222,108 @@ These are business approvals, not engineering defaults. Public website values ar
 - **API response contract:** existing `public_html/openapi.yaml` must be reconciled with routes/controller behavior before publishing new endpoint schemas.
 - **Availability setup:** no evidence yet establishes Extra Fun's actual slot generation or authoritative boat/instructor/equipment schedule; P0 depends on those configurations.
 - **Payment webhook/configuration:** current payment configuration is global-shaped; tenant-specific provider credentials and production callback verification are not verified.
+
+## 26. Implementation Foundation — Repository-Verified Preparation
+
+**Status:** Documentation-only architecture package. No source code, migration, database, configuration, or deployment change has been made. This proposal is not an approval to implement.
+
+### Verified baseline and limits
+
+- **Verified Git:** remote `Keroles12345/ReefOS`, branch `main`, `HEAD` and `origin/main` both `d8ab9ba4b1a46818d21e88e8c5cd9273f497bc8b`; worktree was clean at task start.
+- **Verified runtime:** PHP `8.5.10`, Laravel `13.43.0`, PDO drivers `mysql` and `sqlite`; a local in-memory SQLite connection reports `3.53.4`.
+- **Not verified:** active local development DB engine/version, Hostinger/production DB engine/version, live schema/index/FK state, staging parity, or live `prices_company` data. In-memory SQLite and PHPUnit configuration are not evidence of those environments.
+- **Verified schema facts:** `trips` is the canonical existing product FK used by `operations`; `extras` and `operation_extras` already exist; `currencies` is shared/global. The tenant migration adds nullable `tenant_id` FKs with `nullOnDelete` to tenant-owned tables and backfills existing rows.
+- **Verified `prices_company` drift:** the migration, query-builder callers, and test fixture use `id_company`, `id_trip`, `id_currency`, `price_adult`, `price_child`, and `price_infant`; the model uses different fillable/relation names. The model has no direct caller found in the repository search. This resolves the repository-level naming question, not the live-schema question.
+- **Verified booking gap:** the current website API writes `operations` without a capacity reservation; existing staff booking paths also exist. There are no matching current tables for quotes, reservations, channels, API clients, participant classifications, or availability slots.
+- **Validation:** no application tests, migrations, production/staging queries, or deployments were run for this preparation.
+
+### Final proposed decisions and trade-offs
+
+1. **Catalog:** keep `trips` as the only canonical product. Add optional categories and child variants; do not add `products`. This preserves existing operation, hotel, and price references.
+2. **API ownership:** one API client belongs to exactly one tenant and one company. A company belongs to one tenant. Each sales channel belongs to exactly one tenant/company and one active shared currency. One API client may access multiple channels only when all share its tenant and company. Multi-company access requires separate clients.
+3. **Participant pricing:** store people individually only where the client requires it. Classifications are dimensioned: e.g. age band and activity/qualification are separate dimensions, so one person may be adult and diver. Configurable pricing conditions match those dimensions; no age threshold, qualification rule, or medical field is assumed.
+4. **Capacity:** slot limit is the session participant cap; active reservation items are the sole usage ledger. Boat capacity comes from existing `boats.capacity`; approved instructor limits and equipment stock are explicit resource constraints. Availability is calculated, not stored. No operation and converted reservation are counted twice.
+5. **Quote/reservation/booking:** quotes snapshot server-calculated prices and consume no inventory. A quote may create at most one successful reservation. A reservation has its own approved expiry, creates temporary capacity/resource holds, and retains its quoted amount. Booking conversion locks and validates an unexpired hold, then creates the existing `operations` row and converts the reservation atomically.
+6. **Compatibility:** new catalog/quote/availability/reservation routes use API-client authorization. Existing tenant-key routes remain unchanged during transition. A capacity-managed trip cannot be booked through an old path without a valid reservation.
+
+### Proposed ERD
+
+```mermaid
+erDiagram
+    TENANTS ||--o{ COMPANIES : owns
+    TENANTS ||--o{ TRIPS : owns
+    TENANTS ||--o{ SALES_CHANNELS : owns
+    COMPANIES ||--o{ SALES_CHANNELS : serves
+    CURRENCIES ||--o{ SALES_CHANNELS : prices_in
+    TENANTS ||--o{ API_CLIENTS : owns
+    COMPANIES ||--o{ API_CLIENTS : authorizes
+    API_CLIENTS }o--o{ SALES_CHANNELS : linked_through
+    PRODUCT_CATEGORIES o|--o{ TRIPS : classifies
+    TRIPS ||--o{ TRIP_VARIANTS : offers
+    TRIPS ||--o{ AVAILABILITY_SLOTS : scheduled_as
+    TRIP_VARIANTS o|--o{ AVAILABILITY_SLOTS : narrows
+    AVAILABILITY_SLOTS ||--o{ SLOT_RESOURCES : uses
+    API_CLIENTS ||--o{ BOOKING_QUOTES : creates
+    SALES_CHANNELS ||--o{ BOOKING_QUOTES : scopes
+    TRIPS ||--o{ BOOKING_QUOTES : quotes
+    BOOKING_QUOTES ||--o| BOOKING_RESERVATIONS : holds_as
+    BOOKING_RESERVATIONS ||--|{ BOOKING_RESERVATION_ITEMS : allocates
+    AVAILABILITY_SLOTS ||--o{ BOOKING_RESERVATION_ITEMS : reserved_for
+    BOOKING_RESERVATION_ITEMS ||--o{ RESERVATION_RESOURCE_ITEMS : holds
+    BOOKING_RESERVATIONS o|--o| OPERATIONS : converts_once
+    OPERATIONS ||--o{ BOOKING_PARTICIPANTS : contains
+    BOOKING_PARTICIPANTS }o--o{ PARTICIPANT_CLASSIFICATIONS : classified_by
+    OPERATIONS ||--o{ OPERATION_EXTRAS : snapshots
+    EXTRAS ||--o{ OPERATION_EXTRAS : selected_as
+```
+
+The diagram is a target proposal, not current schema. `currencies` remains global. Tenant consistency must be enforced by tenant-scoped services and, where target-engine support and existing parent indexes permit, composite foreign keys.
+
+### Proposed migration list and dependency order
+
+All entries are proposed additive migrations, not created or approved. Confirm actual engine/schema and audit existing data before any DDL.
+
+| Order | Migration group | Dependencies and key rules |
+|---|---|---|
+| **M0** | Baseline evidence; no DDL | Obtain sanitized active-local/target/staging engine versions, relevant schema metadata, migration ledger, tenant-null/cross-tenant counts, and duplicate `prices_company` keys. No credentials or customer rows. |
+| **M1** | `sales_channels`, `api_clients`, `api_client_sales_channels` | New `tenant_id`, company, and channel ownership fields are non-null. Channel currency is a required FK to shared `currencies`. Unique tenant/channel code, API key prefix, and client/channel pair. Restrict deletion of referenced business records; revoke/deactivate instead. |
+| **M2** | `product_categories`, `trip_variants`, additive `trips` fields | `trips` remains canonical. Add tenant-scoped public ID/type/category fields; category/variant references restrict deletion. Unique tenant/public ID and tenant/trip/variant code. |
+| **M3** | Conditional `prices_company` extension; participant tables; `trip_extras` if needed | Add channel/variant/pricing-rule fields only after duplicate and live-schema audit; no price uniqueness until rows are reconciled. Add per-person classification dictionary/pivot and `booking_participants` only for confirmed collection needs. Reuse existing extras and operation extras. |
+| **M4** | `availability_slots`, `slot_resources` | Depends on M2 and approved schedules/capacities. Tenant-owned rows use non-null tenant IDs; typed resource FKs and interval indexes; unique public slot ID. No `remaining_capacity`. Restrict deletion for referenced resources. |
+| **M5** | `booking_quotes`, quote snapshot/line storage | Depends on M1–M4 and approved pricing/quote inputs. Required tenant/client/channel/company/currency/trip references; optional variant/slot as contract requires; immutable price snapshot and expiry. Quotes create no reservation items. |
+| **M6** | `booking_reservations`, reservation items, resource allocations; nullable unique reservation reference on `operations` | Depends on M4–M5. Required status/expiry; unique quote-to-reservation and operation-to-reservation relationships; indexes for slot/status/expiry queries. Preserve historical rows; no cascade from tenant/product/resource to booking records. |
+| **M7** | API wiring and compatibility changes; no new idempotency table by default | Reuse `tenant_api_idempotency_keys`; scope its existing unique key by deriving a hash from tenant/client/endpoint/raw key. Keep old key middleware/routes until mapped clients cut over; do not clone one legacy hash into multiple API clients. |
+
+For new historical/business rows, use restrictive deletion or deactivation; reserve cascading deletes for pure join rows or child rows only where the approved retention policy allows it. Existing nullable tenant columns are not made non-null by this plan. Do not add a duplicate products, extras, currencies, bookings, payments, or idempotency system.
+
+### Bounded P0 task breakdown
+
+| Task | Status / dependency | Deliverable and acceptance |
+|---|---|---|
+| Verify sanitized local and target DB baseline; resolve `prices_company` model/schema drift | **Blocked** on authorized non-production local DB identity and sanitized target/staging evidence | Record actual engine/version, schema/FKs/indexes/nullability, migration state, and aggregate duplicate/tenant-integrity counts. No schema mutation. |
+| Confirm owner/client rules: prices, currencies, schedules/timezone, capacities, exclusive/shared boats, participants, pickup, cancellations, payment, resource stock, legacy integrations | **Requires Client Decision** | Written approved values/policies; no website observation becomes an active rule. |
+| Freeze API client/channel ownership and safe legacy-key transition | Depends on company/channel owner mapping | New endpoints cannot select arbitrary company/currency; legacy keys are not cloned across clients. |
+| Implement API-client security and channel authorization | After baseline, decisions, design approval | New clients are independently revocable and restricted to one company and its linked channels; legacy routes regressions pass. |
+| Extend Trips catalog with categories/variants | After security contract and catalog mapping | Existing IDs and legacy trip response remain valid; no Products table. |
+| Implement pricing, participant classifications, and extras applicability | After schema reconciliation and approved price/participant rules | Deterministic server pricing; independent attributes; existing extras/operation_extras reused. |
+| Implement non-blocking quotes and read-only availability | After pricing and slot/resource design | Quote creates no hold; availability is calculated from slot limits and allocation ledger. |
+| Implement expiring reservation and atomic conversion to `operations` | After availability and concurrency approval | Holds are idempotent and expire; exactly one concurrent request can win final capacity; operation conversion occurs once. |
+| Complete legacy compatibility, migration rehearsal, and controlled rollout | After all P0 behaviors and target-engine tests | Old paths cannot bypass capacity after a trip is enabled; rollback disables new routes without deleting booking evidence. |
+
+Advanced diving execution, medical/safety records, payment/refunds, outbound notifications, and nonessential reporting remain P1 or later unless Extra Fun demonstrates they are required for first-site integration.
+
+### Compatibility, rollback, and focused test plan
+
+- **Compatibility:** all schema changes are additive; retain existing trip/operation/extra/currency IDs, existing price columns, legacy tenant-key routes, and historical operation totals. New routes are separate request contracts. Trips remain legacy-only until explicitly configured as capacity-managed.
+- **Rollback:** deploy additive schema before code; use per-client/channel feature enablement. If problems occur, disable new routes and stop creating holds. Do not drop quote/reservation/allocation or attribution data after records exist; use a forward fix or verified restore. No production migration/deployment is authorized here.
+- **Tenant/API tests:** wrong-tenant trip, company, channel, currency, quote, slot, reservation, and booking are rejected; one client cannot access another company; revoked/expired key and missing scope are rejected; legacy behavior is separately regression-tested.
+- **Pricing/participant/extras tests:** approved price selection; fixed charter fee not multiplied by passengers; adult+diver independent classifications; rule conflict rejection; changed source price does not mutate quote snapshot; extras applicability and inventory quantity snapshots.
+- **Quote/reservation tests:** quote leaves capacity unchanged; quote and hold expiries are independent; same idempotency key/body replays the original resource and expiry; changed body conflicts; replay never extends a hold; failed multi-slot reservation rolls back all items.
+- **Target-engine concurrency:** use independent connections/processes on the confirmed production-matching staging engine. Race two requests for the final seat and for overlapping exclusive boat/staff/equipment claims; exactly one conflicting hold succeeds. SQLite tests alone are insufficient evidence.
+- **Booking lifecycle tests:** valid reservation converts once to one `operations` record; expired/released holds cannot convert; lifecycle cancellation releases inventory only when approved policy permits; operation plus reservation state/history change atomically; legacy non-capacity trip flows remain unchanged.
+- **Migration tests:** fresh install and sanitized existing-schema upgrade; validate FK/index/unique enforcement, duplicate handling, rollback before durable records, and safe behavior after records exist.
+
+No tests or migrations were executed as part of this preparation. Client/owner decisions in Section 24 and sanitized DB evidence remain outstanding; the design is not implementation approval.
 
 ## 25. Client Acceptance Criteria
 
