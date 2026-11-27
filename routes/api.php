@@ -26,7 +26,7 @@ Route::prefix('v1')->name('api.v1.')->middleware(['tenant.api-key', 'throttle:60
         ->name('companies.index');
     Route::get('/currencies', [WebsiteController::class, 'currencies'])->middleware('tenant.api-scope:currencies:read')->name('currencies.index');
     Route::post('/bookings', [WebsiteController::class, 'storeBooking'])
-        ->middleware(['throttle:10,1', 'tenant.api-scope:bookings:create', 'tenant.api-legacy-company'])
+        ->middleware(['throttle:tenant-api-bookings', 'tenant.api-scope:bookings:create', 'tenant.api-legacy-company'])
         ->name('bookings.store');
     Route::get('/bookings/{booking}', [WebsiteController::class, 'booking'])
         ->middleware(['tenant.api-scope:bookings:read', 'tenant.api-legacy-company'])

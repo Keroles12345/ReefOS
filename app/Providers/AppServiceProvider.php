@@ -9,7 +9,10 @@ use App\Support\DashboardTemplateTranslator;
 use App\Support\SystemPermissions;
 use App\Support\TenantContext;
 use App\Support\TenantDatabase;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\ServiceProvider;
 
@@ -32,6 +35,12 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Blade::precompiler([DashboardTemplateTranslator::class, 'compile']);
+
+        RateLimiter::for('tenant-api-bookings', static function (Request $request): Limit {
+            $routeDomain = $request->route()?->getDomain() ?? '';
+
+            return Limit::perMinute(10)->by($routeDomain.'|'.$request->ip());
+        });
 
         Blade::if('systemPermission', function (string $module, string $action = 'view'): bool {
             return SystemPermissions::allows(auth()->user(), $module, $action);

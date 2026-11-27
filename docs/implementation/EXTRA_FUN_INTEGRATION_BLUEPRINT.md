@@ -1225,7 +1225,7 @@ These are business approvals, not engineering defaults. Public website values ar
 
 ## 26. Implementation Foundation — Repository-Verified Preparation
 
-**Status:** This section records the architecture-preparation baseline. A later, isolated legacy API company-binding increment is implemented and tested in the local working tree; it is uncommitted and not deployed. No migration, database, configuration, or production change has been made. This proposal does not authorize production/schema changes beyond separately approved implementation steps.
+**Status:** This section records the architecture-preparation baseline. The legacy API company-binding increment is committed in `574e19f57b7dc8e49ca1ef33d317ac46942eb878` on `origin/main`; the feature branch was created from that commit. A follow-up increment adds authorization/rate-limit regressions and replaces the colliding booking numeric throttle with a named 10/minute limiter; it is locally committed as `4e8a3d0d8151d8ba6f1d06e2feddee3db8a88cbe`, but push failed because GitHub HTTPS authentication was unavailable. Remote feature-branch state and deployment status are not verified. Authorization uses request-start semantics: already-authorized in-flight requests may complete, and requests checked after a company/key change commits are denied. This is not a target-engine concurrency guarantee. No migration, database, configuration, or production change has been made.
 
 ### Verified baseline and limits
 

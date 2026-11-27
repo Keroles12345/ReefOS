@@ -1,19 +1,20 @@
 # Extra Fun Integration — Implementation Status
 
-- **Overall status:** P0.1 implementation in progress; the first security-containment increment is implemented and tested locally.
-- **Current phase:** P0.1 — legacy API company-scoped authorization containment.
+- **Overall status:** P0.1 implementation in progress; legacy company containment and the booking-limiter/auth regression increment are committed locally. Push is blocked by unavailable GitHub HTTPS authentication.
+- **Current phase:** P0.1 — legacy API company-scoped authorization and regression hardening.
 - **P0.0 audit status:** **BLOCKED**; live database/Hostinger evidence and owner/client approvals remain outstanding.
 - **P0.1 API-client/channel schema:** Not started; active database identity and schema evidence remain unverified.
-- **Security review:** No evidence-based vulnerability found in the final diff. The inactive-company issue is fixed. One medium residual risk remains: company ownership/deactivation changes are not atomically revalidated during an in-flight request.
-- **Last updated:** 2026-11-27 23:19 +02:00
+- **Authorization semantics:** Checks are made at request start. Revocation/company changes committed before a later request's check deny that request; an already-authorized in-flight request may complete. Strict mid-request cancellation or target-engine locking has not been implemented or verified.
+- **Security review:** No confirmed company-boundary bypass found. The prior in-flight concern is documented as request-start semantics; concurrency behavior on the target engine remains unverified.
+- **Last updated:** 2026-11-27 23:31 +02:00
 
 ## Verified repository snapshot
 
 - Remote: `https://github.com/Keroles12345/ReefOS.git`
-- Branch: `main`
-- `HEAD` and `origin/main`: `01da4d9b26a54a1897cd1129dca0ac7d6c6d703b` (`ar p0.1 v1`)
-- The local and remote refs were synchronized at verification. The worktree is now dirty with uncommitted implementation and documentation changes.
-- No commit or push was created. Historical repository snapshots remain in [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md).
+- Branch: `feature/extra-fun-platform`
+- `HEAD`: `4e8a3d0d8151d8ba6f1d06e2feddee3db8a88cbe` (`Fix legacy booking API rate limit`); `origin/main` remains at `574e19f57b7dc8e49ca1ef33d317ac46942eb878`.
+- The worktree was clean when this branch was created from current `main`. Increment 1 was already committed and present on `origin/main`; it was preserved, not recreated.
+- The new increment is committed locally. Its push attempt failed with `Invalid username or token. Password authentication is not supported for Git operations.` Remote feature-branch state is not verified. Current handover corrections are uncommitted.
 - Historical commit and blueprint-tracking facts remain preserved in earlier entries of [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md).
 
 ## Verified baseline
@@ -27,12 +28,14 @@
 
 ## Completed in this implementation session
 
-- **Verified:** commit `01da4d9b26a54a1897cd1129dca0ac7d6c6d703b` contains only six documentation paths; no application implementation pre-existed in that commit.
-- **Implemented:** company-sensitive legacy `/api/v1` routes require exactly one active tenant company and bind request handling to its ID. Trip pricing, company listing, booking/status/payment/refund lookups, and idempotency replay are company-scoped. Zero, multiple, or inactive-only company configurations return `403 legacy_api_company_binding_required`.
-- **Tested:** `php artisan test tests/Feature/WebsiteApiTest.php` — 18 tests, 235 assertions passed using phpunit's in-memory SQLite configuration.
-- **Checked:** Pint `--test`, PHP syntax checks for each changed PHP file, `php artisan route:list --path=api/v1 -v`, and `git diff --check` completed successfully.
-- **Updated:** [API_CONTRACTS.md](../API_CONTRACTS.md), [DATABASE.md](../DATABASE.md), and [EXTRA_FUN_INTEGRATION_BLUEPRINT.md](../implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md) to distinguish the temporary local guard from future API-client/channel authorization.
+- **Verified:** commit `574e19f57b7dc8e49ca1ef33d317ac46942eb878` on current `origin/main` contains the already-implemented legacy company-binding increment. The previous handover's `01da4d9...`/dirty-worktree snapshot was stale.
+- **Preserved:** created `feature/extra-fun-platform` from the synchronized `574e19f...` main commit; no existing changes were discarded or recreated.
+- **Reviewed:** focused Security Engineer review found no confirmed company-boundary bypass. Request-start authorization is the defined behavior; requests already authorized may complete, while requests checked after revocation/company change are denied. This is not a target-engine concurrency test.
+- **Implemented:** Replaced the colliding numeric booking throttle with a named limiter, preserving the 60/minute API group limit and the prior route-domain/IP request partition for the 10/minute booking counter.
+- **Tested:** `php artisan test tests/Feature/WebsiteApiTest.php` — **22 tests / 258 assertions passed** using the test suite's in-memory SQLite. Coverage includes 10 allowed booking attempts from one IP, a separate IP bucket, a `429` on the 11th from the first IP, missing-context logging, request-start company binding/subsequent denial, cross-tenant company input rejection without writes, and trip-list pricing after company rebinding.
+- **Checked:** `vendor/bin/pint --test app/Providers/AppServiceProvider.php routes/api.php tests/Feature/WebsiteApiTest.php`, `php -l` on all three changed PHP files, and `git diff --check` passed.
 - **No database changes:** no migrations were created or run; no configured local or production DB was accessed.
+- **Review:** Security Engineer found no vulnerability; Reviewer approved after closing the low-priority independent-IP coverage finding; QA passed. Local commit is complete; push/remote SHA verification is blocked by GitHub authentication.
 
 ## Blocked / requires decisions
 
@@ -46,7 +49,7 @@
 - **Security finding 4 — reservation-to-booking conversion rechecks:** pending; no quote/reservation conversion code exists yet.
 - **Security finding 5 — participant input allowlist:** current legacy scalar counts are validated; new structured participant input is not implemented and must be allowlisted before acceptance.
 - **Security finding 6 — evidence wording:** corrected in the API contract, database note, and blueprint.
-- **Independent review:** Security Engineer found no new vulnerability and rated the in-flight ownership-change race a medium residual risk. Reviewer approved after the inactive-company fix; no blocking findings remain. QA confirmed the prior company-boundary gaps are closed. Non-tested behavior remains: missing-context log branch/reason assertions, trip-list-after-rebinding, mismatched `company_id` request input, and the exact booking-specific 10/minute threshold.
+- **Independent review:** The prior Reviewer approved the company-binding implementation and QA confirmed the original boundary coverage. Security Engineer found no vulnerability in the named limiter/auth changes; Reviewer approved after the separate-IP test follow-up; QA passed 22 tests / 258 assertions. No target-engine concurrency or distributed-cache test was performed.
 - **P0.0 audit exit:** not satisfied. See audit sections K.1–K.6; do not mark complete.
 
 ## Changes and checks
@@ -55,9 +58,9 @@
 - Changed docs: `docs/API_CONTRACTS.md`, `docs/DATABASE.md`, `docs/implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md`, plus this status and [NEXT-SESSION.md](./NEXT-SESSION.md). The implementation log remains append-only.
 - No migrations, database records/schema, environment/configuration, OpenAPI, or deployment changes.
 - Active local and production databases were not accessed. Feature tests used the test suite's in-memory SQLite; this does not verify active-local/production engine or locking behavior.
-- A supplemental attempt to directly exercise the booking-specific `10/minute` throttle returned `429` before the expected validation response; the test was removed. `php artisan route:list --path=api/v1 -v` confirms `throttle:10,1` remains ordered before scope/company guards, but this threshold is not claimed as behaviorally tested.
-- Do not mark the code deployed or treat the current uncommitted worktree as remote `main`.
+- The former numeric `throttle:10,1` reused the same route/IP key as the group throttle, making the nested limit effectively trigger after five booking requests. A named limiter now has a distinct framework key; the feature test confirms ten requests reach validation and the eleventh is rate-limited. This is tested on in-memory SQLite and does not change future API-client rate-limit requirements.
+- Do not mark the code deployed. Keep feature-branch changes separate from `main` and push only to the authorized feature branch.
 
 ## Exact next action
 
-Obtain authorized sanitized evidence of the active non-production development DB engine/version and relevant schema, plus target/staging metadata. Keep P0.0 blocked until its evidence and approval exit criteria are met. Then begin API-client/channel schema work only on an approved review branch and matching disposable environment. Do not deploy or commit directly to `main`.
+Reconcile and commit this handover update, then retry pushing `feature/extra-fun-platform` only when authorized GitHub authentication is available; verify the remote SHA. Continue engine-independent work where possible. In parallel, obtain authorized sanitized evidence of the active non-production DB engine/version and relevant schema plus matching target/staging metadata. Keep schema-dependent work blocked until those facts are verified; production remains read-only.
