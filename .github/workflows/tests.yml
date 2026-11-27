@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  laravel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: gd, mbstring, pdo_sqlite, sqlite3, pdo_mysql, dom, fileinfo, intl, zip
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Configure application key
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Audit Composer dependencies
+        run: composer audit --no-interaction
+
+      - name: Run Laravel tests
+        run: php artisan test
+
+      - name: Check formatting
+        run: >-
+          vendor/bin/pint --test
+          app/Contracts/PaymentGateway.php
+          app/Contracts/WhatsAppTransport.php
+          app/Exceptions/PaymentProviderNotConfigured.php
+          app/Http/Controllers/Api/PaymentWebhookController.php
+          app/Http/Controllers/Api/WebsiteController.php
+          app/Http/Controllers/OperationAssignmentController.php
+          app/Http/Controllers/SuperAdmin/TenantController.php
+          app/Http/Controllers/Staff/StaffOperations.php
+          app/Http/Middleware/AuthenticateTenantApiKey.php
+          app/Http/Middleware/RequireTenantApiScope.php
+          app/Models/Payment.php
+          app/Models/Tenant.php
+          app/Models/operations.php
+          app/Notifications/BookingEventNotification.php
+          app/Providers/AppServiceProvider.php
+          app/Services/BookingLifecycleService.php
+          app/Services/BookingNotificationDispatcher.php
+          app/Services/PaymentService.php
+          app/Services/PaymentWebhookService.php
+          app/Services/UnconfiguredPaymentGateway.php
+          app/Support/TenantApiScopes.php
+          routes/api.php
+          database/migrations/2026_09_12_132639_add_expired_to_tickets_status.php
+          database/migrations/2026_10_26_000005_create_tenants_and_assign_existing_data.php
+          database/migrations/2026_11_18_000005_drop_encrypted_api_key_from_tenants.php
+          database/migrations/2026_11_18_000006_add_booking_idempotency_lifecycle_and_payments.php
+          tests/Feature/WebsiteApiTest.php
+          tests/Feature/SuperAdminTenantManagementTest.php
