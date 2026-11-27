@@ -310,3 +310,83 @@ These are architectural/documentation risks, not demonstrated vulnerabilities in
 - Clarified that Blueprint Section 26's Git/runtime and no-test statements are historical to the architecture-preparation session, not current implementation state.
 - Marked independent review outcomes complete in the handover and retained the medium in-flight ownership-change risk and non-tested edge cases.
 - No source code changed after the final 18-test / 235-assertion run. No migrations, database queries, or deployments were performed.
+
+## 2026-11-27 23:25 +02:00 — Feature branch recovery and authorization-semantics tests
+
+**Status:** Existing Increment 1 was found already committed and present on `origin/main`; this session preserved it by branching from that exact commit. The follow-up regression increment is tested locally. Independent review/QA and feature-branch commit/push remain pending.
+
+### Verified Git state and branch
+
+- At session start, `git status --short --branch` was clean on `main`; `HEAD` and `origin/main` both equaled `574e19f57b7dc8e49ca1ef33d317ac46942eb878` (`ar p1 v5`).
+- Inspected the commit: it contains the legacy company-binding source, tests, and handover/API/database docs; therefore the prior handover claim that Increment 1 was uncommitted at `01da4d9...` was stale.
+- Created local branch `feature/extra-fun-platform` at the verified commit. No source or user changes were discarded or recreated. The new feature branch has not yet been pushed.
+
+### Security semantics and regression coverage
+
+- Focused Security Engineer review found no confirmed company-boundary bypass. It confirmed the request-start behavior: a key/company change committed before a later request's authorization check denies that request; an already-authorized in-flight request may complete.
+- This adopts documented request-start semantics for the current legacy API; it does not forcibly cancel an in-flight request and is not a tested database concurrency guarantee. Strict serialization/revocation timing remains unimplemented pending target-engine verification.
+- Added tests for missing tenant-context log reason, the request-start binding after company deactivation and denial of a subsequent request, cross-tenant company input rejection without customer/operation writes, and trip-list price scoping after company rebinding.
+- No application behavior, schema, migration, configuration, or production state was changed in this increment; code changes are regression tests only.
+
+### Files and validation
+
+- **Updated:** `tests/Feature/WebsiteApiTest.php`; implementation status, implementation log, next-session handover, `docs/API_CONTRACTS.md`, `docs/DATABASE.md`, and Blueprint Section 26 were reconciled with current Git state and request-start semantics.
+- `php artisan test tests/Feature/WebsiteApiTest.php` — **PASS**, 21 tests / 246 assertions using in-memory SQLite.
+- `vendor/bin/pint --test tests/Feature/WebsiteApiTest.php` — **PASS**.
+- `php -l tests/Feature/WebsiteApiTest.php` — **PASS**.
+- `git diff --check` — **PASS** before final review/commit.
+- No active local/production database query, migration, deployment, commit, or push has occurred in this follow-up increment. `origin/main` still points at the Increment 1 commit.
+
+### Remaining blockers and next action
+
+- Run independent Reviewer and QA checks on the full current diff, address any findings, then commit and push only to `feature/extra-fun-platform` and verify the remote SHA.
+- P0.0 remains **BLOCKED** on authorized sanitized active non-production DB evidence, matching staging/target metadata, and the owner/client decisions in audit Section K.5. No schema-dependent feature, migration, or target-engine concurrency claim is authorized until then.
+
+## 2026-11-27 23:27 +02:00 — Booking limiter collision fixed
+
+**Status:** A real mismatch in the existing booking-specific rate limit was reproduced, fixed, and covered by a focused test. Current branch changes remain uncommitted and await independent review/QA.
+
+### Finding and fix
+
+- Added a focused test expecting ten booking requests to reach validation and the eleventh to receive `429`. The first run failed: the sixth request was already throttled, both in the full file and when isolated.
+- Inspected the installed Laravel `ThrottleRequests` implementation: numeric throttles on the same route resolve to the same route/domain + IP key. The `/api/v1` 60/minute group throttle and `throttle:10,1` therefore incremented the same counter twice per request, effectively limiting bookings to five requests/minute.
+- Registered the separate named `tenant-api-bookings` limiter at 10/minute, keyed by request IP, and replaced only the booking route's numeric limiter. The group 60/minute limiter remains unchanged. This is still IP-scoped legacy behavior, not API-client rate limiting.
+- Security Engineer review of the limiter finding reported no other security vulnerability in its reviewed scope.
+
+### Files and validation
+
+- **Updated source:** `app/Providers/AppServiceProvider.php`, `routes/api.php`, `tests/Feature/WebsiteApiTest.php`.
+- **Updated docs:** API contract, implementation status/log, next-session handover, and Blueprint Section 26; current test counts and known limiter behavior are recorded, while prior log entries remain historical.
+- `php artisan test tests/Feature/WebsiteApiTest.php` — **PASS**, 22 tests / 257 assertions on in-memory SQLite, including 10 allowed booking attempts and a `429` on the 11th.
+- `vendor/bin/pint --test app/Providers/AppServiceProvider.php routes/api.php tests/Feature/WebsiteApiTest.php` — **PASS** after Pint formatting. The first Pint check identified import/spacing fixes; formatting was applied and the check rerun successfully.
+- `php -l` on all three changed PHP files — **PASS**.
+- `git diff --check` — **PASS** before final review/commit.
+- No migration, active/production DB access, database change, deployment, commit, or push.
+
+### Next
+
+- Obtain independent Security Engineer, Reviewer, and QA sign-off on the final diff. Then commit/push only to `feature/extra-fun-platform` and verify its remote SHA.
+- API-client/channel persistence, catalog/pricing schema, availability, quotes, reservations, and target-engine concurrency remain blocked on authorized sanitized non-production DB evidence and applicable client/owner decisions.
+
+## 2026-11-27 23:28 +02:00 — Preserve booking throttle request partition
+
+- Final Security Engineer review confirmed the named limiter has a distinct framework key and found no vulnerability; it noted that IP-based scoping remains legacy behavior and is not client-wide throttling.
+- Refined the named limiter key to include Laravel's route domain plus request IP, matching the prior numeric throttle's request partition while keeping its counter distinct from the 60/minute group limiter.
+- The limiter remains IP-based (not API-client-based); shared-proxy behavior and multi-instance cache behavior were not verified.
+- No migration or database operation. The full focused suite must be rerun after this small key adjustment; independent review/QA and commit/push remain pending.
+
+## 2026-11-27 23:29 +02:00 — Cross-IP limiter regression
+
+- Reviewer approved the limiter change with one low-priority follow-up: test that a second IP has an independent limiter bucket.
+- Extended the existing booking limiter test: ten attempts from the first IP are accepted through validation, the first attempt from a second IP is accepted, and the eleventh from the first IP is rate-limited.
+- `php artisan test tests/Feature/WebsiteApiTest.php` — **PASS**, 22 tests / 258 assertions using in-memory SQLite.
+- Pint, PHP syntax checks, and `git diff --check` passed after the test adjustment. No database or production operation occurred.
+- Final Reviewer/QA confirmation, commit, push, and remote SHA verification remain pending.
+
+## 2026-11-27 23:30 +02:00 — Increment review and QA closure
+
+- **Security Engineer:** No security vulnerabilities found in the named-limiter/auth changes. Noted IP-based rate-limit semantics, request-start authorization, and unverified proxy/cache/production behavior. The limiter key now preserves route-domain/IP partitioning.
+- **Reviewer:** **APPROVE** after the low-priority separate-IP bucket test was added. Remaining non-blocking limitations: IPv6/trusted-proxy behavior and distributed-cache concurrency were not tested.
+- **QA:** **PASS**; independently reran the focused suite and checks: 22 tests / 258 assertions; Pint, syntax checks, and `git diff --check` passed.
+- No reviewer or QA agent modified files. No schema/DB, migration, production, or deployment activity occurred.
+- This 9-file increment is ready for feature-branch commit/push. It remains uncommitted; `origin/main` is unchanged at `574e19f57b7dc8e49ca1ef33d317ac46942eb878`.

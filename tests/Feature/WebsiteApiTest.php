@@ -3,15 +3,18 @@
 namespace Tests\Feature;
 
 use App\Contracts\PaymentGateway;
+use App\Http\Middleware\RequireSingleCompanyLegacyApi;
 use App\Services\PaymentService;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
 
 class WebsiteApiTest extends TestCase
@@ -866,6 +869,28 @@ class WebsiteApiTest extends TestCase
             ->assertTooManyRequests();
     }
 
+    public function test_booking_api_rate_limit_allows_ten_requests_then_rejects_the_next(): void
+    {
+        $this->seedBookingFixture(self::LEGACY_COMPANY_SCOPES);
+
+        for ($request = 0; $request < 10; $request++) {
+            $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.77'])
+                ->withToken($this->apiKey)
+                ->postJson('/api/v1/bookings', [])
+                ->assertUnprocessable();
+        }
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.78'])
+            ->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', [])
+            ->assertUnprocessable();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.77'])
+            ->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', [])
+            ->assertTooManyRequests();
+    }
+
     public function test_legacy_api_rejects_tenants_without_one_unambiguous_company(): void
     {
         $tenantId = DB::table('tenants')->insertGetId([
@@ -922,6 +947,77 @@ class WebsiteApiTest extends TestCase
         $this->assertCompanySensitiveLegacyRoutesDenied();
     }
 
+    public function test_legacy_company_guard_logs_when_tenant_context_is_missing(): void
+    {
+        TenantContext::clear();
+        Log::spy();
+
+        $response = app(RequireSingleCompanyLegacyApi::class)->handle(
+            Request::create('/api/v1/trips', 'GET'),
+            fn (): Response => response()->noContent(),
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn (string $message, array $context): bool => $message === 'Legacy tenant API request rejected because company binding is unavailable'
+                && $context['tenant_id'] === null
+                && $context['reason'] === 'tenant_context_missing');
+    }
+
+    public function test_in_flight_legacy_request_keeps_its_company_binding_after_deactivation(): void
+    {
+        $fixture = $this->seedBookingFixture(self::LEGACY_COMPANY_SCOPES);
+        TenantContext::initialize($fixture['tenantId']);
+
+        try {
+            $response = app(RequireSingleCompanyLegacyApi::class)->handle(
+                Request::create('/api/v1/trips', 'GET'),
+                function (Request $request) use ($fixture): Response {
+                    DB::table('companies')
+                        ->where('id', $fixture['companyId'])
+                        ->update(['status' => false]);
+
+                    return response()->json([
+                        'company_id' => $request->attributes->get('legacy_api_company_id'),
+                    ]);
+                },
+            );
+        } finally {
+            TenantContext::clear();
+        }
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame($fixture['companyId'], json_decode($response->getContent(), true)['company_id']);
+        $this->withToken($this->apiKey)
+            ->getJson('/api/v1/trips')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'legacy_api_company_binding_required');
+    }
+
+    public function test_booking_rejects_a_company_owned_by_another_tenant_without_writes(): void
+    {
+        $fixture = $this->seedBookingFixture(self::LEGACY_COMPANY_SCOPES);
+        $otherTenantId = DB::table('tenants')->insertGetId([
+            'name' => 'Another tenant',
+            'status' => true,
+        ]);
+        $otherCompanyId = DB::table('companies')->insertGetId([
+            'tenant_id' => $otherTenantId,
+            'name' => 'Another tenant company',
+            'status' => true,
+        ]);
+        $payload = $this->bookingPayload($fixture);
+        $payload['company_id'] = $otherCompanyId;
+
+        $this->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', $payload)
+            ->assertUnprocessable();
+
+        $this->assertSame(0, DB::table('operations')->count());
+        $this->assertSame(0, DB::table('customers')->count());
+    }
+
     public function test_legacy_company_rebinding_hides_old_catalog_bookings_and_payments(): void
     {
         $fixture = $this->seedBookingFixture(self::LEGACY_COMPANY_SCOPES);
@@ -954,6 +1050,10 @@ class WebsiteApiTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $replacementCompanyId);
+        $this->withToken($this->apiKey)
+            ->getJson('/api/v1/trips')
+            ->assertOk()
+            ->assertJsonCount(0, 'data.0.prices');
         $this->withToken($this->apiKey)
             ->getJson('/api/v1/trips/'.$fixture['tripId'])
             ->assertOk()

@@ -1,28 +1,32 @@
 # Extra Fun Integration — Next Session Handover
 
-- **Stopped at:** The first P0.1 security-containment increment is implemented and focused-tested locally. P0.0 evidence/approval gate remains **BLOCKED**; no schema-dependent work, migration, production access, or deployment occurred.
-- **Last completed task:** Added exactly-one-active-company enforcement to company-sensitive legacy `/api/v1` routes and scoped company data, booking/payment access, and booking idempotency replay. Focused API suite: 18 tests / 235 assertions passed. Reviewer’s blocking inactive-company edge was fixed and regression-tested.
-- **Exact next task:** Obtain authorized sanitized active non-production DB engine/schema evidence, including target/staging parity, before schema-dependent implementation.
-- **Readiness:** This isolated code increment is implemented, tested, and independently reviewed. New API-client/channel schema, product catalog extensions, availability, quotes, and reservations are **NOT READY** pending their prerequisites.
-- **Snapshot:** `Keroles12345/ReefOS`, branch `main`, `HEAD` / `origin/main` `01da4d9b26a54a1897cd1129dca0ac7d6c6d703b`.
-- **Worktree:** Local `main` and `origin/main` were synchronized at verification. Worktree is now dirty with implementation and documentation changes listed below; no commit or push was created. Preserve all changes.
-- **Last updated:** 2026-11-27 23:19 +02:00
+- **Stopped at:** The security/rate-limit increment is implemented, tested, and independently reviewed on `feature/extra-fun-platform`; commit/push and remote SHA verification remain pending. P0.0 evidence remains **BLOCKED**; no schema-dependent work, migration, production access, or deployment occurred.
+- **Last completed task:** Verified that Increment 1 was already committed and present in `origin/main` as `574e19f57b7dc8e49ca1ef33d317ac46942eb878`; created the feature branch from that commit; fixed the booking throttle's nested-key collision and added company-binding and limiter regressions. Reviewer closed its low-priority separate-IP test finding.
+- **Exact next task:** Commit the reviewed 9-file increment, push to `origin/feature/extra-fun-platform`, and verify remote SHA. Then continue engine-independent work where safe; do not start schema-dependent phases before sanitized matching DB evidence is available.
+- **Readiness:** Legacy company containment remains implemented in the parent commit. The focused tests passed 22 tests / 258 assertions using in-memory SQLite, including 10 allowed booking attempts, an independent second-IP bucket, and a rate-limited 11th request. API clients/channels, product catalog extensions, pricing rules, availability, quotes, and reservations are **NOT READY** pending schema evidence and relevant decisions.
+- **Authorization semantics:** Checks are made at request start. A request already authorized may complete after a company/key change; a later request is denied after the change commits. No target-engine concurrency guarantee is claimed.
+- **Snapshot:** `Keroles12345/ReefOS`, branch `feature/extra-fun-platform`, `HEAD` `574e19f57b7dc8e49ca1ef33d317ac46942eb878`; `origin/main` is the same commit.
+- **Worktree:** The branch was created from a clean, synchronized main. Current uncommitted changes are the test increment and handover/contract corrections. The feature branch has not yet been pushed.
+- **Last updated:** 2026-11-27 23:30 +02:00
 
 ## Before doing anything
 
 1. Read [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md), the newest entry in [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md), and this handover.
-2. Verify `git remote -v`, `git status --short --branch`, `git branch --show-current`, `git rev-parse HEAD`, `git rev-parse origin/main`, and `git log -5 --oneline`. Preserve the current uncommitted implementation and documentation.
+2. Verify `git remote -v`, `git status --short --branch`, `git branch --show-current`, `git rev-parse HEAD`, `git rev-parse origin/main`, and `git log -5 --oneline`. Preserve the current uncommitted feature-branch changes.
 3. Read [P0-0-pre-implementation-audit.md](./P0-0-pre-implementation-audit.md), the full [EXTRA_FUN_INTEGRATION_BLUEPRINT.md](../implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md), [API_CONTRACTS.md](../API_CONTRACTS.md), and [DATABASE.md](../DATABASE.md).
 4. Compare the handover snapshot with actual Git before updating any record. Do not rewrite historical audit evidence or log entries.
 
 ## Exact next task and prerequisites
 
-### 0. Independent review outcomes — completed
+### 0. Earlier review outcomes and current regression increment
 
-- The Security Engineer found no evidence-based vulnerability in the reviewed scope and rated concurrent ownership changes as a medium residual risk; no database or concurrency test was performed.
+- The Security Engineer found no confirmed company-boundary bypass. The in-flight concern is documented as request-start authorization semantics, not an eliminated concurrency race; no target-engine concurrency test was performed.
 - The Reviewer approved after the sole-inactive-company issue was fixed and regression-tested.
 - QA confirmed the company-binding route/service coverage gaps are closed.
-- Non-tested behavior remains: tenant-context-missing log branch and reason logging assertions; trip-list result after rebinding; a valid request with a mismatched `company_id`; behavioral enforcement of the booking-specific 10/minute threshold. Route listing confirms that threshold is registered, but a focused test attempt returned `429` before its expected validation response and was removed.
+- A follow-up Security Engineer review recommends request-start authorization semantics: revocation/company changes deny requests checked afterward; already-authorized in-flight requests may complete. This is not a target-engine concurrency guarantee.
+- Added tests now cover missing-context reason logging, trip-list pricing after rebinding, and rejection of a company ID belonging to another tenant without creating records.
+- The previous `throttle:10,1` shared its framework route/IP counter with the 60/minute group throttle; the new named limiter has an independent counter and focused regression coverage. This is not API-client-scoped rate limiting.
+- Security Engineer found no vulnerability; Reviewer approved after the separate-IP bucket test was added; QA passed 22 tests / 258 assertions. IPv6/proxy trust and distributed-cache behavior remain unverified. Commit and feature-branch push are pending.
 
 ### 1. Obtain database evidence safely
 
@@ -57,7 +61,7 @@ Do not treat website content or proposed defaults as approval.
 - Do not create/run migrations or implement schema-dependent API clients, channels, product metadata, participants, slots, quotes, or reservations until the active non-production DB engine/version and relevant schema are verified.
 - Production remains strictly read-only; never inspect `.env`, request credentials, or connect to production.
 - If authorized local implementation starts later, run focused tests on the confirmed target-matching disposable environment. At minimum test tenant/company/channel isolation, pricing snapshots, non-blocking quotes, expiration/idempotency, final-seat/resource concurrency, booking conversion, and legacy regression.
-- This session ran `php artisan test tests/Feature/WebsiteApiTest.php`: 18 tests / 235 assertions passed on the test suite's in-memory SQLite. No active local or production DB was queried, and no migration was run.
+- This session ran `php artisan test tests/Feature/WebsiteApiTest.php`: 22 tests / 258 assertions passed on the test suite's in-memory SQLite. No active local or production DB was queried, and no migration was run.
 
 ## Relevant files
 
@@ -76,8 +80,8 @@ Do not treat website content or proposed defaults as approval.
 
 ## Warnings
 
-- Source changes in this session are local and uncommitted; do not assume they are deployed or present on remote `main`.
-- Do not commit directly to `main`. Obtain an approved non-main review path before committing/pushing.
+- Current test and documentation changes are local and uncommitted on `feature/extra-fun-platform`. Increment 1 itself is already in the parent commit at current `origin/main`; do not recreate or claim it was newly pushed.
+- Do not commit directly to `main`. Commit/push the current increment only on the approved feature branch after required checks/review.
 - No migration, database, environment/configuration, OpenAPI, or deployment changes were made.
 - Do not equate SQLite test configuration with production. SQLite does not prove target-engine row-lock/concurrency behavior.
 - Do not add a `products` table; `trips` remains canonical.
