@@ -208,3 +208,105 @@ These are architectural/documentation risks, not demonstrated vulnerabilities in
 
 - Next action: obtain the user's choice to fix highest-severity findings, fix all findings, or record a summary. Then proceed only with the selected scope.
 - P0.0 remains blocked on sanitized DB/Hostinger evidence and owner/client decisions. P0.1 implementation has not started.
+
+## 2026-11-27 23:15 +02:00 — P0.1 legacy API company-scoped containment
+
+**Status:** First isolated security increment implemented and focused-tested in the local working tree. Independent follow-up reviews are pending. P0.0 remains **BLOCKED**; no schema-dependent work or deployment occurred.
+
+### Git and repository state
+
+- Verified remote: `https://github.com/Keroles12345/ReefOS.git`; branch `main`.
+- `HEAD` and `origin/main`: `01da4d9b26a54a1897cd1129dca0ac7d6c6d703b` (`ar p0.1 v1`); refs were synchronized at verification.
+- Worktree is now dirty with the implementation and documentation changes listed below. No commit or push was created.
+- The new HEAD commit contains only six documentation paths; no application implementation pre-existed in it.
+
+### Implementation
+
+- Added `RequireSingleCompanyLegacyApi`: company-sensitive legacy endpoints now require exactly one tenant company row and that company must be active. A second inactive/historical company also fails closed. The resolved company ID is attached to the request.
+- Applied the guard after route-scope checks to trips, company listing, booking creation/read/status, payment creation, and refund endpoints. The existing currencies endpoint remains unchanged because currencies are shared/global.
+- Scoped trip pricing, company listing, booking and status lookup, payment intent, refund ownership, and booking idempotency replay to the resolved company.
+- Existing tenant API key storage, route scopes, response paths, booking lifecycle, and shared currency behavior were retained. No `api_clients` or sales-channel schema was added.
+- Updated the API contract, database note, and blueprint to distinguish the temporary working-tree containment from future API-client/channel authorization.
+
+### Review findings and disposition
+
+- Security Engineer's first review found no evidence-based vulnerability in the reviewed diff; concurrent company/booking ownership changes remain a residual risk and were not exercised on a matching DB engine.
+- Reviewer identified that a sole inactive company passed the original guard. Fixed by requiring the sole company status to be active; added a regression test.
+- QA identified untested company boundaries. Added direct coverage for the single-company company list, ambiguous-tenant trips/details/company list/booking create/read/status/payment/refund, company change during idempotency replay, and direct `PaymentService` company constraints.
+- Follow-up Security Engineer, Reviewer, and QA review after those changes is pending. Do not mark the increment independently Verified until it is reconciled.
+
+### Files changed
+
+- **Created:** `app/Http/Middleware/RequireSingleCompanyLegacyApi.php`
+- **Updated:** `app/Http/Controllers/Api/WebsiteController.php`, `app/Services/PaymentService.php`, `bootstrap/app.php`, `routes/api.php`, `tests/Feature/WebsiteApiTest.php`
+- **Updated docs:** `docs/API_CONTRACTS.md`, `docs/DATABASE.md`, `docs/implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md`, `docs/extra-fun/IMPLEMENTATION-STATUS.md`, `docs/extra-fun/NEXT-SESSION.md`
+- **Migrations added/run:** none.
+- **Database/configuration/deployment changes:** none; no configured local or production DB was accessed.
+
+### Validation and limitations
+
+- `php artisan test tests/Feature/WebsiteApiTest.php` — **PASS**, 17 tests / 197 assertions. Test configuration uses in-memory SQLite; this does not verify active-local/production engine behavior or locking.
+- `vendor/bin/pint --test` on the changed middleware, controller, service, routes, and feature test — **PASS**. `bootstrap/app.php` was kept in the repository's existing fully-qualified middleware style and passed `php -l`.
+- `php -l` on all changed PHP files — **PASS**.
+- `php artisan route:list --path=api/v1 -v` — **PASS**; confirms required scopes precede the company guard, and booking's `throttle:10,1` is registered before scope/company authorization.
+- `git diff --check` — **PASS**.
+- A supplemental attempt to behaviorally test the booking-specific `10/minute` throttle returned `429` before the expected validation response, including when run alone. That test was removed; the reason was not established. Only route registration/order—not the exact 10-request threshold—is verified. The existing general tenant throttle feature test passes.
+- No migration, active local DB query, production connection, or deployment action was performed.
+
+### Remaining work
+
+- Reconcile pending independent review results and fix any accepted findings.
+- P0.0 remains blocked on sanitized active-local/Hostinger/staging DB evidence and written owner/client decisions in audit Section K.5. Engine-dependent work remains blocked.
+- Persistent API-client/channel mapping, DB-enforced tenant/cardinality constraints, client/channel-scoped idempotency, reservation conversion, and new participant schema remain unimplemented.
+- Next: complete review of this increment, then obtain authorized sanitized non-production DB engine/schema evidence before any migration or schema-dependent feature.
+
+## 2026-11-27 23:17 +02:00 — Authorization boundary coverage follow-up
+
+**Status:** The prior implementation entry's 17-test result is superseded by the final focused result below. No database or production changes.
+
+### Changes since 23:15
+
+- Updated the middleware rejection log reason to distinguish missing tenant context, no company, multiple companies, and an inactive sole company; the response code/message remains unchanged.
+- Expanded regression tests so zero-company and multiple-company configurations exercise all eight company-sensitive legacy routes.
+- Added a company-rebinding test proving old trip pricing, booking reads/status, payment creation, and refunds are unavailable after the tenant's sole company changes.
+- Updated the payment/refund service test to use a real second company record rather than a synthetic mismatched ID.
+- The log entry at 23:15 remains an accurate timestamped snapshot; final current status and handover now record the additional work and test result.
+
+### Final focused validation
+
+- `php artisan test tests/Feature/WebsiteApiTest.php` — **PASS**, 18 tests / 235 assertions, using in-memory SQLite.
+- `vendor/bin/pint --test` on the changed middleware, controller, service, routes, and feature test — **PASS**.
+- `php -l` on all changed PHP files — **PASS**.
+- `git diff --check` — **PASS**.
+- No migration or database query was run. Follow-up Security Engineer, Reviewer, and QA review was requested and remains pending.
+
+## 2026-11-27 23:18 +02:00 — Independent review closure
+
+**Status:** Increment 1 is independently reviewed and locally tested. P0.0 remains **BLOCKED**. No production/deployment action.
+
+### Review outcomes
+
+- **Security Engineer:** No evidence-based vulnerability found in the final diff. A **MEDIUM residual risk** remains because a company ID is resolved before handler/service work; concurrent trusted deactivation/rebinding is not atomically revalidated. No target-engine concurrency test was performed.
+- **Reviewer:** **APPROVE**. The blocking inactive-only company issue is resolved. No blocking correctness findings remain.
+- **QA Specialist:** **PASS**; independently reran `php artisan test tests/Feature/WebsiteApiTest.php` with 18 tests / 235 assertions. Previously identified company-boundary gaps are covered.
+- No review agent modified files.
+
+### Remaining non-tested behavior
+
+- Missing `TenantContext` logging branch and specific rejection-log reason assertions.
+- Trip-list behavior after rebinding (trip detail and old price isolation are tested).
+- Valid booking request with a mismatched `company_id`.
+- The exact booking-specific `throttle:10,1` threshold. Route listing confirms registration/order, but a direct test attempt returned `429` before the expected validation response; the test was removed and the cause was not established.
+- In-flight concurrent company ownership/deactivation changes on the target database engine.
+
+### Handover
+
+- Updated status and next-session records with final review decisions, residual risk, test evidence, and exact next task.
+- Next: obtain sanitized active non-production DB engine/schema and target/staging evidence from the authorized owner/DBA. No API-client/channel migration until that and the required decisions are satisfied.
+
+## 2026-11-27 23:19 +02:00 — Final documentation consistency update
+
+- Updated the API contract to the final 18-test / 235-assertion result.
+- Clarified that Blueprint Section 26's Git/runtime and no-test statements are historical to the architecture-preparation session, not current implementation state.
+- Marked independent review outcomes complete in the handover and retained the medium in-flight ownership-change risk and non-tested edge cases.
+- No source code changed after the final 18-test / 235-assertion run. No migrations, database queries, or deployments were performed.

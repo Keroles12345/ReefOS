@@ -1,25 +1,28 @@
 # Extra Fun Integration — Next Session Handover
 
-- **Stopped at:** Documentation-only implementation foundation is recorded in the blueprint and shared API/database coordination docs. A read-only Security Engineer review found six open design/documentation findings; no fixes were applied pending user direction. No source code or migration was created. P0.0 evidence/approval gate remains **BLOCKED**.
-- **Last completed task:** Verified repository/runtime/source evidence and documented the target architecture, ERD, proposed migration order, bounded P0 roadmap, compatibility/rollback plan, and focused test plan.
-- **Exact next task:** Ask the user to select the follow-up scope for the security findings; then address the selected documentation-only items before obtaining sanitized DB evidence and client/owner decisions.
-- **Readiness:** Design package is prepared for review; implementation is **NOT READY** pending evidence and decisions.
-- **Snapshot:** `Keroles12345/ReefOS`, branch `main`, `HEAD` / `origin/main` `d8ab9ba4b1a46818d21e88e8c5cd9273f497bc8b`.
-- **Worktree:** Clean and synchronized at task start. Current session has documentation-only edits in the blueprint, API/database coordination docs, and three handover records; they are uncommitted. Preserve them.
-- **Last updated:** 2026-11-27 22:57 +02:00
+- **Stopped at:** The first P0.1 security-containment increment is implemented and focused-tested locally. P0.0 evidence/approval gate remains **BLOCKED**; no schema-dependent work, migration, production access, or deployment occurred.
+- **Last completed task:** Added exactly-one-active-company enforcement to company-sensitive legacy `/api/v1` routes and scoped company data, booking/payment access, and booking idempotency replay. Focused API suite: 18 tests / 235 assertions passed. Reviewer’s blocking inactive-company edge was fixed and regression-tested.
+- **Exact next task:** Obtain authorized sanitized active non-production DB engine/schema evidence, including target/staging parity, before schema-dependent implementation.
+- **Readiness:** This isolated code increment is implemented, tested, and independently reviewed. New API-client/channel schema, product catalog extensions, availability, quotes, and reservations are **NOT READY** pending their prerequisites.
+- **Snapshot:** `Keroles12345/ReefOS`, branch `main`, `HEAD` / `origin/main` `01da4d9b26a54a1897cd1129dca0ac7d6c6d703b`.
+- **Worktree:** Local `main` and `origin/main` were synchronized at verification. Worktree is now dirty with implementation and documentation changes listed below; no commit or push was created. Preserve all changes.
+- **Last updated:** 2026-11-27 23:19 +02:00
 
 ## Before doing anything
 
 1. Read [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md), the newest entry in [IMPLEMENTATION-LOG.md](./IMPLEMENTATION-LOG.md), and this handover.
-2. Verify `git remote -v`, `git status --short --branch`, `git branch --show-current`, `git rev-parse HEAD`, `git rev-parse origin/main`, and `git log -5 --oneline`. Preserve the existing uncommitted documentation.
+2. Verify `git remote -v`, `git status --short --branch`, `git branch --show-current`, `git rev-parse HEAD`, `git rev-parse origin/main`, and `git log -5 --oneline`. Preserve the current uncommitted implementation and documentation.
 3. Read [P0-0-pre-implementation-audit.md](./P0-0-pre-implementation-audit.md), the full [EXTRA_FUN_INTEGRATION_BLUEPRINT.md](../implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md), [API_CONTRACTS.md](../API_CONTRACTS.md), and [DATABASE.md](../DATABASE.md).
 4. Compare the handover snapshot with actual Git before updating any record. Do not rewrite historical audit evidence or log entries.
 
 ## Exact next task and prerequisites
 
-### 0. Resolve the open security review findings
+### 0. Independent review outcomes — completed
 
-The Security Engineer identified one HIGH, four MEDIUM, and one LOW finding in the current proposal. No source-code vulnerability was tested or demonstrated; these are design/documentation issues. Ask the user whether to fix the highest-severity items, fix all findings, or record a summary. Do not silently select or implement a remediation scope.
+- The Security Engineer found no evidence-based vulnerability in the reviewed scope and rated concurrent ownership changes as a medium residual risk; no database or concurrency test was performed.
+- The Reviewer approved after the sole-inactive-company issue was fixed and regression-tested.
+- QA confirmed the company-binding route/service coverage gaps are closed.
+- Non-tested behavior remains: tenant-context-missing log branch and reason logging assertions; trip-list result after rebinding; a valid request with a mismatched `company_id`; behavioral enforcement of the booking-specific 10/minute threshold. Route listing confirms that threshold is registered, but a focused test attempt returned `429` before its expected validation response and was removed.
 
 ### 1. Obtain database evidence safely
 
@@ -48,12 +51,13 @@ Use the decision register in blueprint Section 24 and audit Section K.5. At mini
 
 Do not treat website content or proposed defaults as approval.
 
-### 4. Resume only after prerequisites
+### 4. Resume implementation safely
 
-- Update the architecture/docs with verified evidence and decisions; keep unapproved policies marked **Requires Client Decision**.
-- Do not create migrations or change application code until the actual active local DB engine/version, relevant schema, assumptions, and focused tests are recorded. Production remains read-only.
+- Keep P0.0 **BLOCKED** until audit exit criteria and approvals are satisfied. The user authorized engine-independent implementation; do not use that as permission to guess schema or business rules.
+- Do not create/run migrations or implement schema-dependent API clients, channels, product metadata, participants, slots, quotes, or reservations until the active non-production DB engine/version and relevant schema are verified.
+- Production remains strictly read-only; never inspect `.env`, request credentials, or connect to production.
 - If authorized local implementation starts later, run focused tests on the confirmed target-matching disposable environment. At minimum test tenant/company/channel isolation, pricing snapshots, non-blocking quotes, expiration/idempotency, final-seat/resource concurrency, booking conversion, and legacy regression.
-- No application tests or migrations were run. The only DB query was `SELECT sqlite_version()` against a temporary in-memory SQLite connection; no active local or production DB was queried. Never report tests as passed.
+- This session ran `php artisan test tests/Feature/WebsiteApiTest.php`: 18 tests / 235 assertions passed on the test suite's in-memory SQLite. No active local or production DB was queried, and no migration was run.
 
 ## Relevant files
 
@@ -61,6 +65,7 @@ Do not treat website content or proposed defaults as approval.
 - [EXTRA_FUN_INTEGRATION_BLUEPRINT.md](../implementation/EXTRA_FUN_INTEGRATION_BLUEPRINT.md) — architecture and foundation proposal; Section 26 is preparation only.
 - [API_CONTRACTS.md](../API_CONTRACTS.md) — verified existing routes and proposed client-bound API contract.
 - [DATABASE.md](../DATABASE.md) — repository-derived schema facts and proposed migration dependencies.
+- [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md) — current task state, blockers, and security finding status.
 - `database/migrations/2026_09_08_111011_create_prices_company_table.php`
 - `app/Models/Prices_company.php`
 - `app/Http/Controllers/Api/WebsiteController.php`
@@ -71,7 +76,9 @@ Do not treat website content or proposed defaults as approval.
 
 ## Warnings
 
-- No application source, migration, database, environment/configuration, OpenAPI, or deployment changes are authorized by this handover.
+- Source changes in this session are local and uncommitted; do not assume they are deployed or present on remote `main`.
+- Do not commit directly to `main`. Obtain an approved non-main review path before committing/pushing.
+- No migration, database, environment/configuration, OpenAPI, or deployment changes were made.
 - Do not equate SQLite test configuration with production. SQLite does not prove target-engine row-lock/concurrency behavior.
 - Do not add a `products` table; `trips` remains canonical.
 - A quote never holds inventory; a reservation is a temporary capacity hold; booking conversion is atomic and one-time.

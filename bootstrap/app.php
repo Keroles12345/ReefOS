@@ -35,6 +35,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
             'system-permission' => \App\Http\Middleware\SystemPermissionMiddleware::class,
             'tenant.api-key' => \App\Http\Middleware\AuthenticateTenantApiKey::class,
             'tenant.api-scope' => \App\Http\Middleware\RequireTenantApiScope::class,
+            'tenant.api-legacy-company' => \App\Http\Middleware\RequireSingleCompanyLegacyApi::class,
             'StaffSales' => \App\Http\Middleware\StaffSallesMiddleware::class,
             'StaffOperations' => \App\Http\Middleware\StaffOperationsMiddleware::class,
             'StaffReseller' => \App\Http\Middleware\StaffResellerMiddleware::class,

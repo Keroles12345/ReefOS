@@ -29,6 +29,7 @@ class WebsiteController extends Controller
 {
     public function trips(): JsonResponse
     {
+        $companyId = $this->legacyApiCompanyId();
         $trips = Trips::query()
             ->where('status', true)
             ->with([
@@ -41,13 +42,14 @@ class WebsiteController extends Controller
             ])
             ->orderBy('name')
             ->get()
-            ->map(fn (Trips $trip): array => $this->tripData($trip));
+            ->map(fn (Trips $trip): array => $this->tripData($trip, $companyId));
 
         return response()->json(['data' => $trips]);
     }
 
     public function trip(string $trip): JsonResponse
     {
+        $companyId = $this->legacyApiCompanyId();
         $tripModel = Trips::query()
             ->where('status', true)
             ->with([
@@ -60,12 +62,13 @@ class WebsiteController extends Controller
             ])
             ->findOrFail($trip);
 
-        return response()->json(['data' => $this->tripData($tripModel)]);
+        return response()->json(['data' => $this->tripData($tripModel, $companyId)]);
     }
 
     public function companies(): JsonResponse
     {
         $companies = Companies::query()
+            ->whereKey($this->legacyApiCompanyId())
             ->where('status', true)
             ->orderBy('name')
             ->get(['id', 'name', 'email', 'phone']);
@@ -94,6 +97,7 @@ class WebsiteController extends Controller
         )->validate();
         $idempotencyKey = $request->header('Idempotency-Key');
         $tenantId = (int) TenantContext::id();
+        $companyId = $this->legacyApiCompanyId();
         $keyHash = is_string($idempotencyKey)
             ? hash_hmac('sha256', $idempotencyKey, (string) config('app.key'))
             : null;
@@ -105,7 +109,7 @@ class WebsiteController extends Controller
                 ->where('key_hash', $keyHash)
                 ->first();
             if ($existing) {
-                return $this->idempotencyReplay($existing, $requestHash);
+                return $this->idempotencyReplay($existing, $requestHash, $companyId);
             }
         }
 
@@ -136,6 +140,13 @@ class WebsiteController extends Controller
             'infants' => ['required', 'integer', 'min:0', 'max:100'],
             'remarks' => ['nullable', 'string', 'max:2000'],
         ]);
+
+        if ((int) $data['company_id'] !== $companyId) {
+            return response()->json([
+                'message' => 'The requested company is not authorized for this API key.',
+                'code' => 'company_not_authorized',
+            ], 403);
+        }
 
         if ((int) $data['adults'] + (int) $data['children'] + (int) $data['infants'] < 1) {
             return response()->json(['message' => 'يجب تحديد مسافر واحد على الأقل.'], 422);
@@ -275,7 +286,7 @@ class WebsiteController extends Controller
                 throw $exception;
             }
 
-            return $this->idempotencyReplay($existing, $requestHash);
+            return $this->idempotencyReplay($existing, $requestHash, $companyId);
         }
 
         $notifications->dispatch($result['operation'], 'created', 'A new booking is pending confirmation.');
@@ -285,7 +296,10 @@ class WebsiteController extends Controller
 
     public function booking(string $booking): JsonResponse
     {
-        $operation = operations::query()->where('booking_id', $booking)->firstOrFail();
+        $operation = operations::query()
+            ->where('booking_id', $booking)
+            ->where('id_company', $this->legacyApiCompanyId())
+            ->firstOrFail();
 
         return response()->json([
             'data' => [
@@ -316,7 +330,10 @@ class WebsiteController extends Controller
             'status' => ['required', Rule::in(['confirmed', 'paid', 'cancelled', 'refunded'])],
             'reason' => ['nullable', 'string', 'max:500'],
         ]);
-        $operation = operations::query()->where('booking_id', $booking)->firstOrFail();
+        $operation = operations::query()
+            ->where('booking_id', $booking)
+            ->where('id_company', $this->legacyApiCompanyId())
+            ->firstOrFail();
         $operation = $lifecycle->transition(
             (int) $operation->id,
             (int) TenantContext::id(),
@@ -344,7 +361,12 @@ class WebsiteController extends Controller
         )->validate();
 
         try {
-            $result = $payments->createIntent($booking, (float) $data['amount'], $request->header('Idempotency-Key'));
+            $result = $payments->createIntent(
+                $booking,
+                (float) $data['amount'],
+                $request->header('Idempotency-Key'),
+                $this->legacyApiCompanyId(),
+            );
         } catch (PaymentProviderNotConfigured) {
             return response()->json(['message' => 'لا يوجد مزود دفع مهيأ لهذا النظام.'], 503);
         }
@@ -369,7 +391,12 @@ class WebsiteController extends Controller
         )->validate();
 
         try {
-            $payments->refund((int) $payment, (float) $data['amount'], $request->header('Idempotency-Key'));
+            $payments->refund(
+                (int) $payment,
+                (float) $data['amount'],
+                $request->header('Idempotency-Key'),
+                $this->legacyApiCompanyId(),
+            );
         } catch (PaymentProviderNotConfigured) {
             return response()->json(['message' => 'لا يوجد مزود دفع مهيأ لهذا النظام.'], 503);
         }
@@ -377,8 +404,21 @@ class WebsiteController extends Controller
         return response()->json(['data' => ['payment_id' => (int) $payment, 'status' => 'refund_pending']], 202);
     }
 
-    private function idempotencyReplay(object $existing, string $requestHash): JsonResponse
+    private function idempotencyReplay(object $existing, string $requestHash, int $companyId): JsonResponse
     {
+        if (
+            $existing->operation_id
+            && ! operations::query()
+                ->whereKey($existing->operation_id)
+                ->where('id_company', $companyId)
+                ->exists()
+        ) {
+            return response()->json([
+                'message' => 'This idempotency key does not belong to the authorized company.',
+                'code' => 'idempotency_scope_mismatch',
+            ], 409);
+        }
+
         if (! hash_equals($existing->request_hash, $requestHash)) {
             return response()->json([
                 'message' => 'تم استخدام Idempotency-Key سابقاً مع محتوى مختلف.',
@@ -412,7 +452,7 @@ class WebsiteController extends Controller
         return $data;
     }
 
-    private function tripData(Trips $trip): array
+    private function tripData(Trips $trip, int $companyId): array
     {
         $images = $trip->images
             ->map(fn ($image): string => Storage::disk('public')->url($image->path))
@@ -428,6 +468,7 @@ class WebsiteController extends Controller
                     ->where('cur.is_active', true);
             })
             ->where('pc.id_trip', $trip->id)
+            ->where('pc.id_company', $companyId)
             ->orderBy('c.name')
             ->get([
                 'c.id as company_id',
@@ -461,5 +502,15 @@ class WebsiteController extends Controller
                 ->values(),
             'prices' => $prices,
         ];
+    }
+
+    private function legacyApiCompanyId(): int
+    {
+        $companyId = request()->attributes->get('legacy_api_company_id');
+        if (! is_int($companyId) || $companyId < 1) {
+            throw new \LogicException('The legacy API company middleware must run before company-scoped handlers.');
+        }
+
+        return $companyId;
     }
 }

@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Contracts\PaymentGateway;
+use App\Services\PaymentService;
+use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +16,16 @@ use Tests\TestCase;
 
 class WebsiteApiTest extends TestCase
 {
+    private const LEGACY_COMPANY_SCOPES = [
+        'trips:read',
+        'companies:read',
+        'bookings:create',
+        'bookings:read',
+        'bookings:manage',
+        'payments:create',
+        'payments:refund',
+    ];
+
     private string $apiKey;
 
     protected function setUp(): void
@@ -335,6 +348,11 @@ class WebsiteApiTest extends TestCase
             ->assertJsonPath('data.0.primary_image', Storage::disk('public')->url($imagePath))
             ->assertJsonPath('data.0.images.0', Storage::disk('public')->url($imagePath))
             ->assertJsonPath('data.0.prices.0.company_id', $companyId);
+        $this->withToken($this->apiKey)
+            ->getJson('/api/v1/companies')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $companyId);
         $this->assertNotNull(DB::table('tenants')->where('id', $tenantId)->value('api_key_last_used_at'));
         $this->withToken($this->apiKey)->getJson('/api/v1/trips/'.$otherTripId)->assertNotFound();
 
@@ -439,6 +457,29 @@ class WebsiteApiTest extends TestCase
         $this->assertSame(1, DB::table('operations')->count());
     }
 
+    public function test_legacy_booking_idempotency_replay_is_rejected_after_company_binding_changes(): void
+    {
+        $fixture = $this->seedBookingFixture();
+        $payload = $this->bookingPayload($fixture);
+        $headers = ['Idempotency-Key' => 'website-order-binding-01'];
+
+        $this->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', $payload, $headers)
+            ->assertCreated();
+
+        DB::table('companies')->where('id', $fixture['companyId'])->delete();
+        DB::table('companies')->insert([
+            'tenant_id' => $fixture['tenantId'],
+            'name' => 'Replacement company',
+            'status' => true,
+        ]);
+
+        $this->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', $payload, $headers)
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'idempotency_scope_mismatch');
+    }
+
     public function test_api_scopes_limit_catalog_and_booking_access(): void
     {
         $tenantId = DB::table('tenants')->insertGetId([
@@ -447,6 +488,11 @@ class WebsiteApiTest extends TestCase
             'api_key_prefix' => substr($this->apiKey, 0, 24),
             'api_key_hash' => hash('sha256', $this->apiKey),
             'api_key_scopes' => json_encode(['trips:read']),
+        ]);
+        DB::table('companies')->insert([
+            'tenant_id' => $tenantId,
+            'name' => 'Trips Only Company',
+            'status' => true,
         ]);
         DB::table('regions')->insert(['tenant_id' => $tenantId, 'name' => 'North', 'is_active' => true]);
         $this->withToken($this->apiKey)->getJson('/api/v1/companies')
@@ -499,6 +545,11 @@ class WebsiteApiTest extends TestCase
             'api_key_hash' => hash('sha256', $this->apiKey),
             'api_key_expires_at' => today()->addDay()->toDateString(),
             'api_key_scopes' => json_encode(['trips:read']),
+        ]);
+        DB::table('companies')->insert([
+            'tenant_id' => $tenantId,
+            'name' => 'Revoked API Company',
+            'status' => true,
         ]);
 
         $this->withToken($this->apiKey)->getJson('/api/v1/trips')->assertOk();
@@ -793,11 +844,16 @@ class WebsiteApiTest extends TestCase
 
     public function test_tenant_api_rate_limit_is_enforced(): void
     {
-        DB::table('tenants')->insert([
+        $tenantId = DB::table('tenants')->insertGetId([
             'name' => 'Rate Limited Tenant',
             'status' => true,
             'api_key_prefix' => substr($this->apiKey, 0, 24),
             'api_key_hash' => hash('sha256', $this->apiKey),
+        ]);
+        DB::table('companies')->insert([
+            'tenant_id' => $tenantId,
+            'name' => 'Rate Limited Company',
+            'status' => true,
         ]);
         Log::spy();
 
@@ -808,5 +864,191 @@ class WebsiteApiTest extends TestCase
         $this->withToken($this->apiKey)
             ->getJson('/api/v1/trips')
             ->assertTooManyRequests();
+    }
+
+    public function test_legacy_api_rejects_tenants_without_one_unambiguous_company(): void
+    {
+        $tenantId = DB::table('tenants')->insertGetId([
+            'name' => 'Ambiguous API Tenant',
+            'status' => true,
+            'api_key_prefix' => substr($this->apiKey, 0, 24),
+            'api_key_hash' => hash('sha256', $this->apiKey),
+            'api_key_scopes' => json_encode(self::LEGACY_COMPANY_SCOPES),
+        ]);
+        DB::table('companies')->insert([
+            [
+                'tenant_id' => $tenantId,
+                'name' => 'Active company',
+                'status' => true,
+            ],
+            [
+                'tenant_id' => $tenantId,
+                'name' => 'Inactive historical company',
+                'status' => false,
+            ],
+        ]);
+
+        $this->assertCompanySensitiveLegacyRoutesDenied();
+    }
+
+    public function test_legacy_api_rejects_company_specific_access_when_tenant_has_no_company(): void
+    {
+        DB::table('tenants')->insert([
+            'name' => 'Unassigned API Tenant',
+            'status' => true,
+            'api_key_prefix' => substr($this->apiKey, 0, 24),
+            'api_key_hash' => hash('sha256', $this->apiKey),
+            'api_key_scopes' => json_encode(self::LEGACY_COMPANY_SCOPES),
+        ]);
+
+        $this->assertCompanySensitiveLegacyRoutesDenied();
+    }
+
+    public function test_legacy_api_rejects_an_inactive_single_company(): void
+    {
+        $tenantId = DB::table('tenants')->insertGetId([
+            'name' => 'Inactive Company API Tenant',
+            'status' => true,
+            'api_key_prefix' => substr($this->apiKey, 0, 24),
+            'api_key_hash' => hash('sha256', $this->apiKey),
+            'api_key_scopes' => json_encode(self::LEGACY_COMPANY_SCOPES),
+        ]);
+        DB::table('companies')->insert([
+            'tenant_id' => $tenantId,
+            'name' => 'Inactive company',
+            'status' => false,
+        ]);
+
+        $this->assertCompanySensitiveLegacyRoutesDenied();
+    }
+
+    public function test_legacy_company_rebinding_hides_old_catalog_bookings_and_payments(): void
+    {
+        $fixture = $this->seedBookingFixture(self::LEGACY_COMPANY_SCOPES);
+        $bookingResponse = $this->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', $this->bookingPayload($fixture))
+            ->assertCreated();
+        $bookingId = $bookingResponse->json('data.booking_id');
+        $operationId = DB::table('operations')->where('booking_id', $bookingId)->value('id');
+        $paymentId = DB::table('payments')->insertGetId([
+            'tenant_id' => $fixture['tenantId'],
+            'operation_id' => $operationId,
+            'provider' => 'test',
+            'amount' => 25,
+            'currency_code' => 'EGP',
+            'status' => 'succeeded',
+            'transaction_reference' => 'rebound-payment-reference',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('companies')->where('id', $fixture['companyId'])->delete();
+        $replacementCompanyId = DB::table('companies')->insertGetId([
+            'tenant_id' => $fixture['tenantId'],
+            'name' => 'Replacement company',
+            'status' => true,
+        ]);
+        config(['services.marinax_payments.provider' => 'test']);
+
+        $this->withToken($this->apiKey)
+            ->getJson('/api/v1/companies')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $replacementCompanyId);
+        $this->withToken($this->apiKey)
+            ->getJson('/api/v1/trips/'.$fixture['tripId'])
+            ->assertOk()
+            ->assertJsonCount(0, 'data.prices');
+        $this->withToken($this->apiKey)->getJson('/api/v1/bookings/'.$bookingId)->assertNotFound();
+        $this->withToken($this->apiKey)
+            ->patchJson('/api/v1/bookings/'.$bookingId.'/status', ['status' => 'confirmed'])
+            ->assertNotFound();
+        $this->withToken($this->apiKey)
+            ->withHeader('Idempotency-Key', 'rebound-payment-create-01')
+            ->postJson('/api/v1/bookings/'.$bookingId.'/payments', ['amount' => 10])
+            ->assertNotFound();
+        $this->withToken($this->apiKey)
+            ->withHeader('Idempotency-Key', 'rebound-refund-create-01')
+            ->postJson('/api/v1/payments/'.$paymentId.'/refund', ['amount' => 10])
+            ->assertNotFound();
+    }
+
+    public function test_payment_service_rejects_bookings_and_refunds_outside_the_bound_company(): void
+    {
+        $fixture = $this->seedBookingFixture();
+        $bookingResponse = $this->withToken($this->apiKey)
+            ->postJson('/api/v1/bookings', $this->bookingPayload($fixture))
+            ->assertCreated();
+        $operationId = DB::table('operations')
+            ->where('booking_id', $bookingResponse->json('data.booking_id'))
+            ->value('id');
+        $paymentId = DB::table('payments')->insertGetId([
+            'tenant_id' => $fixture['tenantId'],
+            'operation_id' => $operationId,
+            'provider' => 'test',
+            'amount' => 25,
+            'currency_code' => 'EGP',
+            'status' => 'succeeded',
+            'transaction_reference' => 'test-payment-reference',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $otherCompanyId = DB::table('companies')->insertGetId([
+            'tenant_id' => $fixture['tenantId'],
+            'name' => 'Other real company',
+            'status' => true,
+        ]);
+
+        config(['services.marinax_payments.provider' => 'test']);
+        TenantContext::initialize($fixture['tenantId']);
+
+        try {
+            try {
+                app(PaymentService::class)->createIntent(
+                    $bookingResponse->json('data.booking_id'),
+                    10,
+                    'test-payment-idempotency-01',
+                    $otherCompanyId,
+                );
+                $this->fail('Payment creation should reject a booking outside the bound company.');
+            } catch (ModelNotFoundException) {
+                $this->assertSame(1, DB::table('payments')->count());
+            }
+
+            try {
+                app(PaymentService::class)->refund(
+                    $paymentId,
+                    10,
+                    'test-refund-idempotency-01',
+                    $otherCompanyId,
+                );
+                $this->fail('Refund creation should reject a payment outside the bound company.');
+            } catch (ModelNotFoundException) {
+                $this->assertSame(0, DB::table('payment_refunds')->count());
+            }
+        } finally {
+            TenantContext::clear();
+        }
+    }
+
+    private function assertCompanySensitiveLegacyRoutesDenied(): void
+    {
+        $requests = [
+            fn () => $this->withToken($this->apiKey)->getJson('/api/v1/companies'),
+            fn () => $this->withToken($this->apiKey)->getJson('/api/v1/trips'),
+            fn () => $this->withToken($this->apiKey)->getJson('/api/v1/trips/999'),
+            fn () => $this->withToken($this->apiKey)->postJson('/api/v1/bookings', []),
+            fn () => $this->withToken($this->apiKey)->getJson('/api/v1/bookings/unknown'),
+            fn () => $this->withToken($this->apiKey)->patchJson('/api/v1/bookings/unknown/status', ['status' => 'confirmed']),
+            fn () => $this->withToken($this->apiKey)
+                ->postJson('/api/v1/bookings/unknown/payments', ['amount' => 1], ['Idempotency-Key' => 'company-payment-01']),
+            fn () => $this->withToken($this->apiKey)
+                ->postJson('/api/v1/payments/999/refund', ['amount' => 1], ['Idempotency-Key' => 'company-refund-01']),
+        ];
+
+        foreach ($requests as $request) {
+            $request()
+                ->assertForbidden()
+                ->assertJsonPath('code', 'legacy_api_company_binding_required');
+        }
     }
 }

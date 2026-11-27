@@ -15,24 +15,29 @@ Route::post('/webhooks/payments/{provider}', PaymentWebhookController::class)
     ->name('api.webhooks.payments');
 
 Route::prefix('v1')->name('api.v1.')->middleware(['tenant.api-key', 'throttle:60,1'])->group(function (): void {
-    Route::get('/trips', [WebsiteController::class, 'trips'])->middleware('tenant.api-scope:trips:read')->name('trips.index');
-    Route::get('/trips/{trip}', [WebsiteController::class, 'trip'])->middleware('tenant.api-scope:trips:read')->name('trips.show');
-    Route::get('/companies', [WebsiteController::class, 'companies'])->middleware('tenant.api-scope:companies:read')->name('companies.index');
+    Route::get('/trips', [WebsiteController::class, 'trips'])
+        ->middleware(['tenant.api-scope:trips:read', 'tenant.api-legacy-company'])
+        ->name('trips.index');
+    Route::get('/trips/{trip}', [WebsiteController::class, 'trip'])
+        ->middleware(['tenant.api-scope:trips:read', 'tenant.api-legacy-company'])
+        ->name('trips.show');
+    Route::get('/companies', [WebsiteController::class, 'companies'])
+        ->middleware(['tenant.api-scope:companies:read', 'tenant.api-legacy-company'])
+        ->name('companies.index');
     Route::get('/currencies', [WebsiteController::class, 'currencies'])->middleware('tenant.api-scope:currencies:read')->name('currencies.index');
     Route::post('/bookings', [WebsiteController::class, 'storeBooking'])
-        ->middleware('tenant.api-scope:bookings:create')
-        ->middleware('throttle:10,1')
+        ->middleware(['throttle:10,1', 'tenant.api-scope:bookings:create', 'tenant.api-legacy-company'])
         ->name('bookings.store');
     Route::get('/bookings/{booking}', [WebsiteController::class, 'booking'])
-        ->middleware('tenant.api-scope:bookings:read')
+        ->middleware(['tenant.api-scope:bookings:read', 'tenant.api-legacy-company'])
         ->name('bookings.show');
     Route::patch('/bookings/{booking}/status', [WebsiteController::class, 'updateBookingStatus'])
-        ->middleware('tenant.api-scope:bookings:manage')
+        ->middleware(['tenant.api-scope:bookings:manage', 'tenant.api-legacy-company'])
         ->name('bookings.status');
     Route::post('/bookings/{booking}/payments', [WebsiteController::class, 'createPayment'])
-        ->middleware('tenant.api-scope:payments:create')
+        ->middleware(['tenant.api-scope:payments:create', 'tenant.api-legacy-company'])
         ->name('bookings.payments');
     Route::post('/payments/{payment}/refund', [WebsiteController::class, 'refundPayment'])
-        ->middleware('tenant.api-scope:payments:refund')
+        ->middleware(['tenant.api-scope:payments:refund', 'tenant.api-legacy-company'])
         ->name('payments.refund');
 });

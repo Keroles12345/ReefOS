@@ -725,7 +725,7 @@ Credential rotation creates a new client secret, displays it once, allows a brie
 4. If a tenant has multiple companies or integrations, do not copy the same hash into several clients. Issue separate new secrets per company/client because the existing secret cannot be split into independently revocable credentials.
 5. Configure the new API client and validate catalog, quote, reservation, and booking in a test environment.
 6. Keep the legacy key path only for identified integrations during a time-bounded transition. Do not silently map a multi-company key to every company.
-7. Preserve legacy endpoint behavior until an owner-approved client cutover; then authenticate that integration as its bound API client and limit company/currency reads to its mapping. For an ambiguous/unmapped legacy tenant, deny access to new client-bound routes and require an explicit mapping. Existing tenant-wide legacy behavior is a documented, temporary residual risk, not the target architecture.
+7. **Current working-tree containment (implemented and focused-tested; not deployed):** company-sensitive legacy endpoints now fail closed unless exactly one company row belongs to the tenant and that company is active; a second inactive/historical row also blocks access. Request handling is bound to the sole active company. Catalog pricing, company listing, booking/status/payment/refund lookups, and booking idempotency replays are constrained to that company; zero, multiple, or inactive-only configurations receive `403 legacy_api_company_binding_required`. The legacy key is still stored at tenant level and is not persistently bound to a client/channel. This guard is transitional containment, not the final client authorization model; owner mapping and migration to independently revocable API clients remain required. Shared/global currencies retain their existing scope. Do not clone one legacy hash into multiple API clients.
 8. Revoke the tenant key only after the tenant confirms cutover and telemetry shows no remaining legitimate use. Delete legacy columns only in a later approved migration.
 
 The one-tenant-key-to-many-company model cannot be converted into multiple independent secrets without reissuing credentials. A single-company tenant can retain its current secret by moving the existing hash/prefix to one client after explicit mapping. A hash copied to several clients would preserve shared authority and would not provide independent revocation.
@@ -757,7 +757,7 @@ Every new route requires a valid client, scope, active tenant/company/channel, a
 
 - Scope: existing legacy scopes during transition.
 - For requests authenticated as an explicitly migrated API client, response is limited to its bound company and authorized channel currency.
-- Requests still authenticated by the legacy tenant key retain the existing response during the approved, time-bounded transition; do not silently change its authority. New API-client routes never use that broad legacy context.
+- Requests still authenticated by the legacy tenant key use the temporary exactly-one-active-company guard on company-sensitive endpoints; zero, multiple, or inactive-only company configurations receive `403 legacy_api_company_binding_required`. This does not provide persisted client/channel identity or a deprecation deadline. New API-client routes must never use tenant-wide company authority.
 - Errors: `401`, `403`, `429`.
 - Restriction: never expose tenant-wide company/currency data through a new client-bound integration.
 
@@ -1225,17 +1225,17 @@ These are business approvals, not engineering defaults. Public website values ar
 
 ## 26. Implementation Foundation — Repository-Verified Preparation
 
-**Status:** Documentation-only architecture package. No source code, migration, database, configuration, or deployment change has been made. This proposal is not an approval to implement.
+**Status:** This section records the architecture-preparation baseline. A later, isolated legacy API company-binding increment is implemented and tested in the local working tree; it is uncommitted and not deployed. No migration, database, configuration, or production change has been made. This proposal does not authorize production/schema changes beyond separately approved implementation steps.
 
 ### Verified baseline and limits
 
-- **Verified Git:** remote `Keroles12345/ReefOS`, branch `main`, `HEAD` and `origin/main` both `d8ab9ba4b1a46818d21e88e8c5cd9273f497bc8b`; worktree was clean at task start.
+- **Historical Git snapshot for the architecture-preparation session:** remote `Keroles12345/ReefOS`, branch `main`, `HEAD` and `origin/main` both `d8ab9ba4b1a46818d21e88e8c5cd9273f497bc8b`; worktree was clean at that session's start. This is not the current repository snapshot; see the current handover.
 - **Verified runtime:** PHP `8.5.10`, Laravel `13.43.0`, PDO drivers `mysql` and `sqlite`; a local in-memory SQLite connection reports `3.53.4`.
 - **Not verified:** active local development DB engine/version, Hostinger/production DB engine/version, live schema/index/FK state, staging parity, or live `prices_company` data. In-memory SQLite and PHPUnit configuration are not evidence of those environments.
 - **Verified schema facts:** `trips` is the canonical existing product FK used by `operations`; `extras` and `operation_extras` already exist; `currencies` is shared/global. The tenant migration adds nullable `tenant_id` FKs with `nullOnDelete` to tenant-owned tables and backfills existing rows.
 - **Verified `prices_company` drift:** the migration, query-builder callers, and test fixture use `id_company`, `id_trip`, `id_currency`, `price_adult`, `price_child`, and `price_infant`; the model uses different fillable/relation names. The model has no direct caller found in the repository search. This resolves the repository-level naming question, not the live-schema question.
 - **Verified booking gap:** the current website API writes `operations` without a capacity reservation; existing staff booking paths also exist. There are no matching current tables for quotes, reservations, channels, API clients, participant classifications, or availability slots.
-- **Validation:** no application tests, migrations, production/staging queries, or deployments were run for this preparation.
+- **Validation during the architecture-preparation session:** no application tests, migrations, production/staging queries, or deployments were run. Subsequent implementation and test results are recorded in the handover and implementation log.
 
 ### Final proposed decisions and trade-offs
 
@@ -1345,4 +1345,4 @@ The P0 integration is accepted only when:
 - existing payments remain disabled until a real provider is configured and verified;
 - client-approved schedules, capacities, price rules, pickup rules, participant fields, cancellation policy, and payment configuration are recorded;
 - all P0 acceptance scenarios execute successfully before deployment;
-- no source code, migration, database or configuration is changed for this plan.
+- production changes and deployment remain separately gated; local implementation must use verified non-production database evidence before any schema-dependent migration.

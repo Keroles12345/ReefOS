@@ -17,8 +17,12 @@ class PaymentService
 {
     public function __construct(private readonly PaymentGateway $gateway) {}
 
-    public function createIntent(string $bookingId, float $amount, string $idempotencyKey): array
-    {
+    public function createIntent(
+        string $bookingId,
+        float $amount,
+        string $idempotencyKey,
+        ?int $companyId = null,
+    ): array {
         $provider = config('services.marinax_payments.provider');
         if (! is_string($provider) || $provider === '') {
             throw new PaymentProviderNotConfigured;
@@ -26,16 +30,22 @@ class PaymentService
 
         $tenantId = (int) TenantContext::id();
         $keyHash = hash_hmac('sha256', $idempotencyKey, (string) config('app.key'));
-        $operation = operations::query()->where('booking_id', $bookingId)->firstOrFail();
+        $operationQuery = operations::query()->where('booking_id', $bookingId);
+        if ($companyId !== null) {
+            $operationQuery->where('id_company', $companyId);
+        }
+        $operation = $operationQuery->firstOrFail();
         $currency = Currencies::query()->where('is_active', true)->findOrFail($operation->id_currency);
 
         try {
-            $payment = DB::transaction(function () use ($operation, $provider, $amount, $keyHash, $currency, $tenantId): Payment {
-                $lockedOperation = operations::query()
+            $payment = DB::transaction(function () use ($operation, $provider, $amount, $keyHash, $currency, $tenantId, $companyId): Payment {
+                $operationQuery = operations::query()
                     ->where('tenant_id', $tenantId)
-                    ->whereKey($operation->id)
-                    ->lockForUpdate()
-                    ->firstOrFail();
+                    ->whereKey($operation->id);
+                if ($companyId !== null) {
+                    $operationQuery->where('id_company', $companyId);
+                }
+                $lockedOperation = $operationQuery->lockForUpdate()->firstOrFail();
                 $existing = Payment::query()
                     ->where('tenant_id', $tenantId)
                     ->where('idempotency_key_hash', $keyHash)
@@ -103,8 +113,12 @@ class PaymentService
         return ['payment' => $payment, 'redirect_url' => $intent['redirect_url']];
     }
 
-    public function refund(int $paymentId, float $amount, string $idempotencyKey): Payment
-    {
+    public function refund(
+        int $paymentId,
+        float $amount,
+        string $idempotencyKey,
+        ?int $companyId = null,
+    ): Payment {
         $tenantId = (int) TenantContext::id();
         $provider = config('services.marinax_payments.provider');
         if (! is_string($provider) || $provider === '') {
@@ -112,13 +126,22 @@ class PaymentService
         }
         $keyHash = hash_hmac('sha256', $idempotencyKey, (string) config('app.key'));
         try {
-            $refund = DB::transaction(function () use ($paymentId, $tenantId, $keyHash, $amount): object {
+            $refund = DB::transaction(function () use ($paymentId, $tenantId, $keyHash, $amount, $companyId): object {
                 $lockedPayment = Payment::query()
                     ->where('tenant_id', $tenantId)
                     ->whereKey($paymentId)
                     ->lockForUpdate()
                     ->first();
                 if (! $lockedPayment) {
+                    throw (new ModelNotFoundException)->setModel(Payment::class, [$paymentId]);
+                }
+                $operationQuery = operations::query()
+                    ->where('tenant_id', $tenantId)
+                    ->whereKey($lockedPayment->operation_id);
+                if ($companyId !== null) {
+                    $operationQuery->where('id_company', $companyId);
+                }
+                if (! $operationQuery->exists()) {
                     throw (new ModelNotFoundException)->setModel(Payment::class, [$paymentId]);
                 }
 

@@ -19,28 +19,28 @@ For each endpoint, record:
 
 ## Existing API inventory
 
-**Status: VERIFIED from checked-in routes/controllers/tests; not a live-deployment probe.** Routes are in `routes/api.php`; handlers are primarily in `app/Http/Controllers/Api/WebsiteController.php`.
+**Status: VERIFIED from current working-tree routes/controllers/tests; not a live-deployment probe.** Routes are in `routes/api.php`; handlers are primarily in `app/Http/Controllers/Api/WebsiteController.php`.
 
-The `/api/v1` route group uses tenant API-key authentication, route scopes, and a 60/minute throttle; booking creation also has a 10/minute throttle. The key is currently stored on the tenant and is not bound to a company or sales channel. Existing booking requests accept `company_id` and `currency_id`.
+The `/api/v1` route group uses tenant API-key authentication, route scopes, and a 60/minute throttle; booking creation also has a 10/minute throttle. The key remains stored on the tenant and is not persistently bound to a company or sales channel. The current working-tree implementation adds a temporary fail-closed guard to company-sensitive legacy endpoints: exactly one company row must exist for the tenant, and that company must be active. Data/lookups are constrained to that company. Zero, multiple, or inactive-only configurations return `403 legacy_api_company_binding_required`. Booking input must match the resolved company. Shared/global currencies remain available under their existing scope. This is code-level containment, not API-client/channel authorization or a deployed change. Existing booking requests accept `company_id` and `currency_id`.
 
 | Method and path | Current authorization | Current behavior |
 |---|---|---|
 | `GET /api/documentation`, `GET /api/openapi.yaml` | Public | Serve API documentation/OpenAPI files. |
 | `POST /api/webhooks/payments/{provider}` | Throttle plus provider-signature verification | Payment webhook; separate from tenant-key routes. |
-| `GET /api/v1/trips`, `GET /api/v1/trips/{trip}` | Tenant key + `trips:read` | Tenant trip catalog; trip response includes active company prices. |
-| `GET /api/v1/companies` | Tenant key + `companies:read` | All active companies in the authenticated tenant. |
+| `GET /api/v1/trips`, `GET /api/v1/trips/{trip}` | Tenant key + `trips:read` + exactly-one-company guard | Tenant trip catalog; prices are limited to the single resolved company. |
+| `GET /api/v1/companies` | Tenant key + `companies:read` + exactly-one-company guard | The single active company resolved for this legacy key. |
 | `GET /api/v1/currencies` | Tenant key + `currencies:read` | Active shared/global currencies. |
-| `POST /api/v1/bookings` | Tenant key + `bookings:create`; optional `Idempotency-Key` | Creates a customer and existing `operations` row from client-supplied trip/company/currency and participant counts. No capacity reservation exists in the inspected flow. |
-| `GET /api/v1/bookings/{booking}` | Tenant key + `bookings:read` | Read a tenant booking by booking reference. |
-| `PATCH /api/v1/bookings/{booking}/status` | Tenant key + `bookings:manage` | Uses the existing booking lifecycle service. |
-| `POST /api/v1/bookings/{booking}/payments` | Tenant key + `payments:create` | Payment intent path; current provider is not configured. |
-| `POST /api/v1/payments/{payment}/refund` | Tenant key + `payments:refund` | Refund path; provider behavior remains unconfigured. |
+| `POST /api/v1/bookings` | Tenant key + `bookings:create` + exactly-one-company guard; optional `Idempotency-Key` | Creates a customer and existing `operations` row; the supplied company must match the resolved company. No capacity reservation exists in the inspected flow. |
+| `GET /api/v1/bookings/{booking}` | Tenant key + `bookings:read` + exactly-one-company guard | Reads only a booking belonging to the resolved company. |
+| `PATCH /api/v1/bookings/{booking}/status` | Tenant key + `bookings:manage` + exactly-one-company guard | Uses the existing booking lifecycle service after company-scoped lookup. |
+| `POST /api/v1/bookings/{booking}/payments` | Tenant key + `payments:create` + exactly-one-company guard | Payment intent lookup is company-scoped; current provider is not configured. |
+| `POST /api/v1/payments/{payment}/refund` | Tenant key + `payments:refund` + exactly-one-company guard | Refund lookup verifies the payment's operation belongs to the resolved company; provider behavior remains unconfigured. |
 
-`tests/Feature/WebsiteApiTest.php` contains API key, scope, booking, idempotency, lifecycle, and payment cases. The tests were inspected but not run for this documentation update. The existing tenant-wide key's company access is a compatibility/security concern; do not silently change its authority as part of an additive integration.
+`tests/Feature/WebsiteApiTest.php` contains API key, scope, booking, idempotency, lifecycle, and payment cases. The focused suite was run for the current working-tree increment: **18 tests and 235 assertions passed** using the test suite's in-memory SQLite configuration. This is not a test of the active local database, production, or a deployed build. Existing legacy keys still lack persistent company/channel identity; API-client authorization and channel-scoped idempotency remain future work.
 
 ## Extra Fun P0 API proposal
 
-**Status: PROPOSED, not implemented or client-approved.** Existing `/api/v1` legacy routes remain separate and retain their current contract during transition.
+**Status: PROPOSED, not implemented or client-approved.** Existing `/api/v1` legacy routes remain separate. The current working-tree implementation applies the temporary exactly-one-company guard described above; new client-bound endpoints and channel authorization are not implemented.
 
 ### Ownership and authorization
 
@@ -48,7 +48,7 @@ The `/api/v1` route group uses tenant API-key authentication, route scopes, and 
 - Each `sales_channel` belongs to exactly one tenant and company and resolves exactly one active currency from the existing global `currencies` table.
 - One API client may access one or more channels only when they have the same tenant and company as the client. A multi-company integration uses separate clients.
 - New routes authenticate an API-client credential, then resolve the authorized channel/company/currency server-side. `company_id` and `currency_id` are not authority selectors; an inconsistent supplied value is rejected.
-- Legacy tenant keys continue to authenticate only existing routes during migration. Do not copy one legacy key hash to multiple clients. A single mapped integration may retain the existing secret only after explicit owner mapping; otherwise issue a distinct key, overlap for an observed transition, then revoke the old key after owner sign-off.
+- Legacy tenant keys continue to authenticate only existing routes during migration, subject to the temporary company guard. Do not copy one legacy key hash to multiple clients. A single mapped integration may retain the existing secret only after explicit owner mapping; otherwise issue a distinct key, overlap for an observed transition, then revoke the old key after owner sign-off.
 - Scopes are proposed as `catalog:read`, `availability:read`, `quotes:create/read`, `reservations:create/read`, and `bookings:create/read/manage`. Final scope names require contract approval. Rate limits should key on API client, with optional IP limits.
 
 ### Proposed endpoints and lifecycle
